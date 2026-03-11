@@ -44,6 +44,7 @@ autotuner.log
 *.pem
 *.mir
 *.bin
+*.perfetto
 
 Qwen3-1.7b/
 Qwen3-1.7b-mllm/

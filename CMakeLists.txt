@@ -215,6 +215,7 @@ endif()
 if(MLLM_PERFETTO_ENABLE)
   include_directories(third_party/perfetto/sdk)
   add_library(perfetto STATIC third_party/perfetto/sdk/perfetto.cc)
+  set_target_properties(perfetto PROPERTIES POSITION_INDEPENDENT_CODE ON)
   add_compile_definitions(MLLM_PERFETTO_ENABLE=1)
 endif()
 

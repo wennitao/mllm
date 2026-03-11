@@ -13,6 +13,8 @@ Tasks:
         - "-DMLLM_KERNEL_THREADS_VENDOR_OPENMP=ON"
         - "-DMLLM_KERNEL_USE_THREADS_VENDOR_MLLM=OFF"
         - "-DMLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE=ON"
+        # Profiling
+        - "-DMLLM_PERFETTO_ENABLE=ON"
 
   - CMakeBuildTask:
       cmake_cfg_path: "build-qnn-aot"

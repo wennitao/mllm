@@ -23,6 +23,7 @@ MLLM_MAIN({
     return 0;
   }
 
+  // mllm::initializeContext();
   mllm::initQnnBackend(model_path.get());
 
   auto qwen3_cfg = mllm::models::qwen3::Qwen3Config(config_path.get());
@@ -41,6 +42,10 @@ MLLM_MAIN({
   fmt::print("💬 Prompt text (or 'exit/quit'): ");
   std::getline(std::cin, prompt_text);
 
+  #ifdef MLLM_PERFETTO_ENABLE
+  mllm::perf::start();
+  #endif
+
   auto input_tensor = tokenizer.convertMessage({.prompt = prompt_text});
 
   Runner runner(config, &tokenizer);
@@ -52,6 +57,13 @@ MLLM_MAIN({
   runner.generate(input_tensor["sequence"], config.context_len,
                   [](const std::string& token) { std::cout << token << std::flush; });
   std::cout << "\n";
+
+  #ifdef MLLM_PERFETTO_ENABLE
+  mllm::perf::stop();
+  mllm::perf::saveReport("qwen3.perfetto");
+  #endif
+
+  mllm::shutdownContext();
 
   return 0;
 });

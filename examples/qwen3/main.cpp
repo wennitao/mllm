@@ -13,18 +13,19 @@ MLLM_MAIN({
   auto& model_version = Argparse::add<std::string>("-mv|--model_version").help("Model version").required(true);
   auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer_path").help("Tokenizer directory").required(true);
   auto& config_path = Argparse::add<std::string>("-c|--config_path").help("Config path").required(true);
+  auto& perf_path = Argparse::add<std::string>("--perf_path").help("Perfetto trace output path").def("qwen3.perf");
 
   Argparse::parse(argc, argv);
-
-#ifdef MLLM_PERFETTO_ENABLE
-  mllm::perf::start();
-#endif
 
   mllm::ModelFileVersion file_version = mllm::ModelFileVersion::kV1;
   if (model_version.get() == "v1") {
     file_version = mllm::ModelFileVersion::kV1;
   } else if (model_version.get() == "v2") {
     file_version = mllm::ModelFileVersion::kV2;
+  } else {
+    fmt::print("❌ Unsupported model_version: {} (expected v1 or v2)\n", model_version.get());
+    mllm::shutdownContext();
+    return 1;
   }
 
   if (help.isSet()) {
@@ -32,6 +33,10 @@ MLLM_MAIN({
     mllm::shutdownContext();
     return 0;
   }
+
+#ifdef MLLM_PERFETTO_ENABLE
+  mllm::perf::start();
+#endif
 
   {
     auto qwen3_cfg = mllm::models::qwen3::Qwen3Config(config_path.get());
@@ -66,7 +71,7 @@ MLLM_MAIN({
 
 #ifdef MLLM_PERFETTO_ENABLE
   mllm::perf::stop();
-  mllm::perf::saveReport("qwen3.perf");
+  mllm::perf::saveReport(perf_path.get());
 #endif
 
   mllm::print("\n");
