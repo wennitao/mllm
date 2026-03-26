@@ -11,7 +11,7 @@ echo "Hello, introduce yourself." | ./mllm-qwen3-runner \
   -c config_0.6B_cpu.json
 '
 
-
+'''
 DEVICE=d00e762e
 PORT=5041
 
@@ -49,6 +49,7 @@ adb -P $PORT -s $DEVICE push $LIBOMP /data/local/tmp/
 adb -P $PORT -s $DEVICE shell "cd /data/local/tmp && \
 chmod +x ./mllm-qwen3-runner && \
 export LD_LIBRARY_PATH=. && \
+'''
 export ADSP_LIBRARY_PATH=/data/local/tmp && \
 ./mllm-qwen3-runner \
 -m qwen3-0.6B-cpu.mllm \
