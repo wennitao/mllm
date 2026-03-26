@@ -239,6 +239,8 @@ class Qwen3Text final : public nn::Module {
 
     return {x};
   }
+
+  nn::Embedding& embedding() { return embedding_; }
 };
 
 class Qwen3ForCausalLM : public ARGeneration, public nn::Module {
@@ -258,12 +260,6 @@ class Qwen3ForCausalLM : public ARGeneration, public nn::Module {
     tie_word_embeddings_ = cfg.tie_word_embeddings;
 
     llm = reg<Qwen3Text>("model", cfg);
-
-    if (cfg.tie_word_embeddings) {
-      // NOTE:
-      // model.lm_head.weight is quantization weights of model.embed_tokens.weight
-      lm_head_ = reg<nn::Linear>("lm_head_out", cfg.hidden_size, cfg.vocab_size, false, cfg.linear_impl_type);
-    }
 
     // Init inv freq
     auto inv = makeRoPEInvFreq(cfg.head_dim, cfg.rope_theta);
@@ -307,7 +303,10 @@ class Qwen3ForCausalLM : public ARGeneration, public nn::Module {
       auto S = sequence.shape()[1];
       sequence = sequence[{kAll, {S - 1}, kAll}];
     }
-    if (tie_word_embeddings_) { sequence = lm_head_(sequence); }
+    if (tie_word_embeddings_) {
+      auto emb_w = llm.embedding().weight();
+      sequence = nn::functional::matmul(sequence, emb_w, false, true);
+    }
 
     return {
         {"sequence", sequence},
@@ -320,7 +319,6 @@ class Qwen3ForCausalLM : public ARGeneration, public nn::Module {
  private:
   const Qwen3Config& cfg;
   Qwen3Text llm;
-  nn::Linear lm_head_;
   bool tie_word_embeddings_;
   nn::StaticCache kv_cache_;
 };

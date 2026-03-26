@@ -106,7 +106,6 @@ class QwenMLPCPU final : public nn::Module {
   nn::SiLU silu_;
 };
 
-// Qwen2 doesn't use q_norm/k_norm
 class QwenAttentionCPU final : public nn::Module {
  public:
   QwenAttentionCPU() = default;
@@ -117,10 +116,13 @@ class QwenAttentionCPU final : public nn::Module {
     num_key_value_heads_ = cfg.num_key_value_heads;
     head_dim_ = cfg.head_dim;
 
-    q_proj_ = reg<nn::Linear>("q_proj", hidden_size_, head_dim_ * num_attention_heads_, true, cfg.linear_impl_type);
-    k_proj_ = reg<nn::Linear>("k_proj", hidden_size_, head_dim_ * num_key_value_heads_, true, cfg.linear_impl_type);
-    v_proj_ = reg<nn::Linear>("v_proj", hidden_size_, head_dim_ * num_key_value_heads_, true, cfg.linear_impl_type);
-    o_proj_ = reg<nn::Linear>("o_proj", head_dim_ * num_attention_heads_, hidden_size_, false, cfg.linear_impl_type);
+    q_proj_ = reg<nn::Linear>("q_proj", hidden_size_, head_dim_ * num_attention_heads_, cfg.attention_bias, cfg.linear_impl_type);
+    k_proj_ = reg<nn::Linear>("k_proj", hidden_size_, head_dim_ * num_key_value_heads_, cfg.attention_bias, cfg.linear_impl_type);
+    v_proj_ = reg<nn::Linear>("v_proj", hidden_size_, head_dim_ * num_key_value_heads_, cfg.attention_bias, cfg.linear_impl_type);
+    o_proj_ = reg<nn::Linear>("o_proj", head_dim_ * num_attention_heads_, hidden_size_, cfg.attention_bias, cfg.linear_impl_type);
+
+    q_norm_ = reg<nn::RMSNorm>("q_norm", cfg.rms_norm_eps);
+    k_norm_ = reg<nn::RMSNorm>("k_norm", cfg.rms_norm_eps);
 
     q_rope_ = reg<nn::RoPE>("q_rope", cfg.rope_theta, cfg.max_position_embeddings);
     k_rope_ = reg<nn::RoPE>("k_rope", cfg.rope_theta, cfg.max_position_embeddings);
@@ -151,10 +153,16 @@ class QwenAttentionCPU final : public nn::Module {
     auto key_states = k_proj_(hidden_states);
     auto value_states = v_proj_(hidden_states);
 
-    // Reshape to [B, S, H, D] then transpose to [B, H, S, D] as in Qwen2Attention
-    query_states = query_states.view({B, S, num_attention_heads_, head_dim_}).transpose(1, 2);
-    key_states = key_states.view({B, S, num_key_value_heads_, head_dim_}).transpose(1, 2);
+    // Reshape to [B, S, H, D], apply Qwen3 q/k norm, then transpose to [B, H, S, D].
+    query_states = query_states.view({B, S, num_attention_heads_, head_dim_});
+    key_states = key_states.view({B, S, num_key_value_heads_, head_dim_});
     value_states = value_states.view({B, S, num_key_value_heads_, head_dim_}).transpose(1, 2);
+
+    query_states = q_norm_(query_states);
+    key_states = k_norm_(key_states);
+
+    query_states = query_states.transpose(1, 2);
+    key_states = key_states.transpose(1, 2);
 
     // Apply RoPE
     query_states = q_rope_(query_states, llm_embedding_sin, llm_embedding_cos);
@@ -196,6 +204,8 @@ class QwenAttentionCPU final : public nn::Module {
   nn::Linear k_proj_;
   nn::Linear v_proj_;
   nn::Linear o_proj_;
+  nn::RMSNorm q_norm_;
+  nn::RMSNorm k_norm_;
 
   nn::RoPE q_rope_;
   nn::RoPE k_rope_;
@@ -289,7 +299,9 @@ class QwenForCausalLMCPU : public nn::Module, public ARGeneration {
 
   explicit QwenForCausalLMCPU(const std::string& name, const QwenNPUConfig& cfg) : cfg_(cfg), nn::Module(name) {
     text_model_ = reg<QwenTextCPU>("model", cfg_);
-    lm_head_ = reg<nn::Linear>("lm_head", cfg_.hidden_size, cfg_.vocab_size, false, cfg_.linear_impl_type);
+    if (!cfg_.tie_word_embeddings) {
+      lm_head_ = reg<nn::Linear>("lm_head", cfg_.hidden_size, cfg_.vocab_size, false, cfg_.linear_impl_type);
+    }
 
     eos_token_id_ = static_cast<int>(cfg_.eos_token_id);
     max_length_ = cfg_.max_cache_length;
@@ -328,7 +340,13 @@ class QwenForCausalLMCPU : public nn::Module, public ARGeneration {
     // Clip to last valid position
     { hidden_states = hidden_states[{kAll, {real_seq - 1}, kAll}]; }
 
-    auto logits = lm_head_(hidden_states);
+    Tensor logits;
+    if (!cfg_.tie_word_embeddings) {
+      logits = lm_head_(hidden_states);
+    } else {
+      auto emb_w = text_model_.embedding().weight();
+      logits = nn::functional::matmul(hidden_states, emb_w, /*trans_a=*/false, /*trans_b=*/true);
+    }
 
     return {
         {"sequence", logits},

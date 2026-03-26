@@ -288,6 +288,11 @@ typedef struct {     // NOLINT
 static_assert(sizeof(mllm_mxfp4_t) == 17, "wrong mxfp4 size/padding");
 
 typedef struct {  // NOLINT
+  uint16_t data;
+} mllm_bfloat16_t;
+static_assert(sizeof(mllm_bfloat16_t) == 2, "wrong bfloat16 size/padding");
+
+typedef struct {  // NOLINT
   uint8_t data;
 } mllm_uint8_per_tensor_t;
 static_assert(sizeof(mllm_uint8_per_tensor_t) == 1, "wrong uint8 size/padding");
@@ -554,6 +559,9 @@ MLLM_DEFINE_BASIC_TYPE_INFO(mllm_int8_t, 0, 1, std::numeric_limits<mllm_int8_t>:
 MLLM_DEFINE_BASIC_TYPE_INFO(mllm_uint8_t, 0, 1, std::numeric_limits<mllm_uint8_t>::max(),
                             std::numeric_limits<mllm_uint8_t>::min(), "UInt8");
 
+MLLM_DEFINE_BASIC_TYPE_INFO(mllm_bfloat16_t, mllm_bfloat16_t{0}, mllm_bfloat16_t{0x3f80},
+                            mllm_bfloat16_t{std::numeric_limits<uint16_t>::max()}, mllm_bfloat16_t{0}, "BFloat16");
+
 // There is no need to declare mllm_byte_t. It's already declared in mllm_uint8_t.
 
 // Placeholder types for per-tensor and per-channel quantization
@@ -680,6 +688,7 @@ struct MllmDataTypeInfo {};
 
 MLLM_DEFINE_SELF_TYPE_INFO(DataTypes::kFloat32, mllm_fp32_t);
 MLLM_DEFINE_SELF_TYPE_INFO(DataTypes::kFloat16, mllm_fp16_t);
+MLLM_DEFINE_SELF_TYPE_INFO(DataTypes::kBFloat16, mllm_bfloat16_t);
 MLLM_DEFINE_SELF_TYPE_INFO(DataTypes::kInt8, mllm_int8_t);
 MLLM_DEFINE_SELF_TYPE_INFO(DataTypes::kUInt8, mllm_uint8_t);
 MLLM_DEFINE_SELF_TYPE_INFO(DataTypes::kBool, mllm_uint8_t);

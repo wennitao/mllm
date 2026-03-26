@@ -9,6 +9,7 @@
 #include "mllm/models/ARGeneration.hpp"
 #include "mllm/preprocessor/tokenizers/Unicode.hpp"
 #include "mllm/preprocessor/tokenizers/AutoTokenizer.hpp"
+#include "mllm/utils/Log.hpp"
 
 namespace mllm::models::qwen3 {
 
@@ -156,10 +157,14 @@ struct Qwen3Message {
 class Qwen3Tokenizer final : public mllm::preprocessor::AutoTokenizer {
  public:
   explicit Qwen3Tokenizer(const std::string& file_path) {
-    preprocessor::initLocal();
+    MLLM_INFO("Qwen3Tokenizer: skip initLocal on this path");
+    MLLM_INFO("Qwen3Tokenizer: makeBytes2UnicodeMap");
     preprocessor::makeBytes2UnicodeMap(bytes_2_unicode_dict_);
+    MLLM_INFO("Qwen3Tokenizer: build inverse unicode map");
     for (auto& kv : bytes_2_unicode_dict_) { bytes_2_unicode_dict_inverse_.insert({kv.second, kv.first}); }
+    MLLM_INFO("Qwen3Tokenizer: load tokenizer json from {}", file_path);
     bpe_.initFromSentencePieceJson(file_path);
+    MLLM_INFO("Qwen3Tokenizer: add special tokens");
     special_tokens_trie_.add(L"<|endoftext|>");
     special_tokens_trie_.add(L"<|im_start|>");
     special_tokens_trie_.add(L"<|im_end|>");
@@ -176,6 +181,7 @@ class Qwen3Tokenizer final : public mllm::preprocessor::AutoTokenizer {
     special_tokens_trie_.add(L"<|video_pad|>");
     special_tokens_trie_.add(L"<think>");
     special_tokens_trie_.add(L"</think>");
+    MLLM_INFO("Qwen3Tokenizer: constructor done");
   }
 
   std::vector<std::wstring> _tokenize(const std::string& str) override {

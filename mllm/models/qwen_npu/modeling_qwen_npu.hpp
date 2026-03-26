@@ -11,6 +11,7 @@
 #include "mllm/nn/Functional.hpp"
 #include "mllm/nn/layers/Param.hpp"
 #include "mllm/utils/Common.hpp"
+#include "mllm/utils/Log.hpp"
 #include "mllm/models/ARGeneration.hpp"
 #include "configuration_qwen_npu.hpp"
 
@@ -99,6 +100,8 @@ class QwenMLP final : public nn::Module {
 
 class QwenAttentionProjNPU : public nn::Module {
   nn::RMSNorm input_layer_norm_;
+  nn::RMSNorm q_norm_;
+  nn::RMSNorm k_norm_;
 
   nn::Linear q_proj_;
   nn::Linear k_proj_;
@@ -125,12 +128,14 @@ class QwenAttentionProjNPU : public nn::Module {
     hidden_size_ = cfg.hidden_size;
     num_attention_heads_ = cfg.num_attention_heads;
     num_key_value_heads_ = cfg.num_key_value_heads;
-    head_dim_ = hidden_size_ / num_attention_heads_;
+    head_dim_ = cfg.head_dim;
     num_key_value_groups_ = num_attention_heads_ / num_key_value_heads_;
     rope_theta_ = cfg.rope_theta;
     max_position_embeddings_ = cfg.max_position_embeddings;
 
     input_layer_norm_ = reg<nn::RMSNorm>("input_layernorm", cfg.rms_norm_eps);
+    q_norm_ = reg<nn::RMSNorm>("self_attn.q_norm", cfg.rms_norm_eps);
+    k_norm_ = reg<nn::RMSNorm>("self_attn.k_norm", cfg.rms_norm_eps);
 
     q_proj_ = reg<nn::Linear>("self_attn.q_proj", hidden_size_, head_dim_ * num_attention_heads_,
                               false /*add it in DequantizeAdd*/, cfg.linear_impl_type);
@@ -177,6 +182,9 @@ class QwenAttentionProjNPU : public nn::Module {
     key_states = k_proj_dequantize_add_(key_states);
     value_states = v_proj_dequantize_add_(value_states);
 
+    query_states = q_norm_(query_states);
+    key_states = k_norm_(key_states);
+
     // [B, H, S, D]
     query_states = query_states.transpose(1, 2);
     key_states = key_states.transpose(1, 2);
@@ -209,7 +217,7 @@ class QwenAttentionMatmul final : public nn::Module {
     hidden_size_ = cfg.hidden_size;
     num_attention_heads_ = cfg.num_attention_heads;
     num_key_value_heads_ = cfg.num_key_value_heads;
-    head_dim_ = hidden_size_ / num_attention_heads_;
+    head_dim_ = cfg.head_dim;
     num_key_value_groups_ = num_attention_heads_ / num_key_value_heads_;
     rope_theta_ = cfg.rope_theta;
     max_position_embeddings_ = cfg.max_position_embeddings;
@@ -366,14 +374,28 @@ class QwenDecoder final : public nn::Module {
   QwenDecoder() = default;
 
   QwenDecoder(const std::string& name, const QwenNPUConfig& cfg) : nn::Module(name) {
+    MLLM_INFO("QwenDecoder({}): reg self_attn_proj_", name);
     self_attn_proj_ = reg<QwenAttentionProjNPU>("", cfg);
-    self_attn_proj_.to(kQNN);
+    MLLM_INFO("QwenDecoder({}): reg self_attn_matmul_", name);
     self_attn_matmul_ = reg<QwenAttentionMatmul>("self_attn", cfg);
+    MLLM_INFO("QwenDecoder({}): reg self_attn_out_mlp_", name);
     self_attn_out_mlp_ = reg<QwenOutProjAndMLP>("", cfg);
+    MLLM_INFO("QwenDecoder({}): constructed", name);
+  }
+
+  void moveQnnOps() {
+    if (qnn_moved_) { return; }
+    auto name = getModuleName();
+    MLLM_INFO("QwenDecoder({}): self_attn_proj_.to(kQNN)", name);
+    self_attn_proj_.to(kQNN);
+    MLLM_INFO("QwenDecoder({}): self_attn_out_mlp_.to(kQNN)", name);
     self_attn_out_mlp_.to(kQNN);
+    MLLM_INFO("QwenDecoder({}): QNN moves done", name);
+    qnn_moved_ = true;
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
+    moveQnnOps();
     auto x = inputs[0];
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
@@ -398,6 +420,9 @@ class QwenDecoder final : public nn::Module {
   }
 
   nn::KVCache& getKVCache() { return self_attn_matmul_.getKVCache(); }
+
+ private:
+  bool qnn_moved_ = false;
 };
 
 class QwenText final : public nn::Module {
@@ -408,15 +433,21 @@ class QwenText final : public nn::Module {
   QwenText() = default;
 
   QwenText(const std::string& name, const QwenNPUConfig& cfg) : nn::Module(name) {
+    MLLM_INFO("QwenText({}): reg decode_blocks_", name);
     decode_blocks_ = reg<nn::ModuleList<QwenDecoder>>("layers", cfg.num_hidden_layers, cfg);
 
+    MLLM_INFO("QwenText({}): reg norm_", name);
     norm_ = reg<nn::RMSNorm>("norm", cfg.rms_norm_eps);
+    MLLM_INFO("QwenText({}): reg embedding_", name);
     embedding_ = reg<nn::Embedding>("embed_tokens", cfg.vocab_size, cfg.hidden_size);
+    MLLM_INFO("QwenText({}): embedding_.to(kQNN)", name);
     embedding_.to(kQNN);  // use QNN version of embedding (handle padding token, execute on CPU)
 
     // Initialize inv_freq for RoPE
+    MLLM_INFO("QwenText({}): register inv_freq", name);
     auto inv_freq = makeRoPEInvFreq(cfg.hidden_size / cfg.num_attention_heads, cfg.rope_theta);
     registerBuffer("inv_freq", inv_freq);
+    MLLM_INFO("QwenText({}): constructed", name);
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
@@ -455,11 +486,14 @@ class QwenForCausalLM : public nn::Module, public ARGeneration {
  public:
   QwenForCausalLM() = default;
   explicit QwenForCausalLM(const std::string& name, const QwenNPUConfig& cfg) : cfg(cfg), nn::Module(name) {
+    MLLM_INFO("QwenForCausalLM({}): reg model", name);
     model = reg<QwenText>("model", cfg);
     if (!cfg.tie_word_embeddings) {
+      MLLM_INFO("QwenForCausalLM({}): reg lm_head", name);
       lm_head_ = reg<nn::Linear>("lm_head", cfg.hidden_size, cfg.vocab_size, false, cfg.linear_impl_type);
     }
     tie_word_embeddings_ = cfg.tie_word_embeddings;
+    MLLM_INFO("QwenForCausalLM({}): constructed", name);
   }
 
   ARGenerationOutputPast forward(const ARGenerationOutputPast& input, const ARGenerationArgs& args) override {

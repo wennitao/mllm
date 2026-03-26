@@ -8,11 +8,12 @@ Tasks:
   - CMakeConfigTask:
       cmake_cfg_path: "build-android-arm64-v8a-qnn"
       cmake_build_type: "Release"
-      cmake_toolchain_file: "$ANDROID_NDK_PATH/build/cmake/android.toolchain.cmake"
+      cmake_toolchain_file: "/mnt/data/chihao/android-ndk-r26d/build/cmake/android.toolchain.cmake"
       cmake_extra_args:
         - "-DMLLM_CROSS_COMPILE=ON"
         - "-DMLLM_BUILD_ARM_BACKEND=ON"
         - "-DMLLM_BUILD_QNN_BACKEND=ON"
+        - "-DMLLM_PERFETTO_ENABLE=ON"
         - "-DANDROID_PLATFORM=android-28"
         - "-DANDROID_ABI=arm64-v8a"
         - '-DMLLM_CPU_BACKEND_COMPILE_OPTIONS="-march=armv8.2-a+fp16+fp16fml+dotprod+i8mm;-ffast-math;-Wno-nan-infinity-disabled"'
@@ -20,6 +21,8 @@ Tasks:
         - "-DMLLM_KERNEL_USE_THREADS=ON"
         - "-DMLLM_KERNEL_THREADS_VENDOR_OPENMP=ON"
         - "-DMLLM_KERNEL_USE_THREADS_VENDOR_MLLM=OFF"
+        - "-DMLLM_PERFETTO_ENABLE=1"
+        - "-DMLLM_ARM_BACKEND_COMPILE_OPTIONS=-march=armv8.2-a+fp16"
 
   - CMakeBuildTask:
       cmake_cfg_path: "build-android-arm64-v8a-qnn"

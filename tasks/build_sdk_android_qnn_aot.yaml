@@ -12,7 +12,7 @@ Tasks:
         - '-DMLLM_CPU_BACKEND_COMPILE_OPTIONS="-march=armv8.2-a+fp16+fp16fml+dotprod+i8mm;-ffast-math;-Wno-nan-infinity-disabled"'
         - "-DCMAKE_INSTALL_PREFIX=mllm-install-android-arm64-v8a-qnn"
         - "-DMLLM_KERNEL_USE_THREADS=ON"
-        - "-DMLLM_KERNEL_THREADS_VENDOR_OPENMP=ON"
+        - "-DMLLM_KERNEL_THREADS_VENDOR_OPENMP=OFF"
         - "-DMLLM_KERNEL_USE_THREADS_VENDOR_MLLM=OFF"
 
   - CMakeBuildTask:

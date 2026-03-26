@@ -14,6 +14,7 @@ size_t lanesOfType(DataTypes dtype) {
   switch (dtype) {
     CASE(kFloat32)
     CASE(kFloat16)
+    CASE(kBFloat16)
     CASE(kGGUF_Q4_0)
     // CASE(kGGUF_Q4_1) There is no such type right now.
     CASE(kGGUF_Q8_0)
@@ -67,6 +68,7 @@ size_t bytesOfType(DataTypes dtype) {
   switch (dtype) {
     CASE(kFloat32)
     CASE(kFloat16)
+    CASE(kBFloat16)
     CASE(kGGUF_Q4_0)
     // CASE(kGGUF_Q4_1) There is no such type right now.
     CASE(kGGUF_Q8_0)
@@ -122,6 +124,7 @@ std::string nameOfType(DataTypes dtype) {
   switch (dtype) {
     CASE(kFloat32)
     CASE(kFloat16)
+    CASE(kBFloat16)
     CASE(kGGUF_Q4_0)
     // CASE(kGGUF_Q4_1) There is no such type right now.
     CASE(kGGUF_Q8_0)

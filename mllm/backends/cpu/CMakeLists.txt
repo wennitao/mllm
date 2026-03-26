@@ -104,6 +104,11 @@ if(MLLM_BUILD_ARM_BACKEND)
   target_include_directories(MllmCPUBackend PUBLIC ${MLLM_KAI_INCLUDE_DIRS})
 else()
   # X86 Backend use highway kernels
+  # Disable Highway tests/examples to avoid pulling in its own googletest,
+  # which may conflict with the repo's bundled googletest targets.
+  set(HWY_ENABLE_TESTS OFF CACHE BOOL "Disable Highway tests" FORCE)
+  set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "Disable Highway examples" FORCE)
+  set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "Disable Highway contrib" FORCE)
   CPMAddPackage(
     NAME highway
     GITHUB_REPOSITORY google/highway

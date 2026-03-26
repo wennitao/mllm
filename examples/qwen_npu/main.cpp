@@ -7,7 +7,7 @@
 #include <mllm/utils/AnyValue.hpp>
 #include <mllm/core/DataTypes.hpp>
 
-#include "mllm/models/qwen_npu/tokenization_qwen.hpp"
+#include "mllm/models/qwen3/tokenization_qwen3.hpp"
 #include "mllm/models/qwen_npu/modeling_qwen_npu_cpu.hpp"  // CPU Qwen model for decode
 #include "mllm/models/qwen_npu/modeling_qwen_npu.hpp"      // NPU Qwen model for prefill
 #include "mllm/nn/lmcache/StaticCache.hpp"                 // For StaticCache type
@@ -35,40 +35,91 @@ int main(int argc, char** argv) {
     MLLM_INFO("Pure CPU inference mode");
   }
 
-  const std::string config_path = "config_1.8B_w8a16_qnn.json";
-  const std::string npu_model_path = "/data/local/tmp/zhanghao/models/qwen1.5-1.8b-chat-rot-qnn.mllm";
-  const std::string cpu_decode_model_path = "/data/local/tmp/zhanghao/models/qwen1.5-1.8b-chat-rot_q4_0.mllm";
+  const std::string config_path = "/data/local/tmp/config.json";
+  const std::string npu_model_path = "/data/local/tmp/qwen3-1.7B.mllm";
+  const std::string cpu_decode_model_path = "/data/local/tmp/qwen3-1.7B-cpu.mllm";
 
-  auto qwen_tokenizer = mllm::models::qwen_npu::QwenTokenizer("tokenizer.json", "qwen_merges.txt");
+  MLLM_INFO("Creating tokenizer...");
+  auto qwen_tokenizer = mllm::models::qwen3::Qwen3Tokenizer("/data/local/tmp/tokenizer.json");
+  MLLM_INFO("Tokenizer created");
 
-  mllm::ModelFileVersion file_version = mllm::ModelFileVersion::kV1;
+  mllm::ModelFileVersion file_version = mllm::ModelFileVersion::kV2;
+  const int max_new_tokens = 128;
 
+  MLLM_INFO("Loading config from: {}", config_path);
   auto cpu_cfg = mllm::models::qwen_npu::QwenNPUConfig(config_path);
+  if (use_npu_prefill && cpu_cfg.num_hidden_layers > 20) {
+    MLLM_INFO("Limiting mixed path from {} to 20 layers to reduce device memory pressure", cpu_cfg.num_hidden_layers);
+    cpu_cfg.num_hidden_layers = 20;
+  }
+  MLLM_INFO("Config loaded: layers={}, hidden_size={}, kv_heads={}, head_dim={}, tie_word_embeddings={}",
+            cpu_cfg.num_hidden_layers, cpu_cfg.hidden_size, cpu_cfg.num_key_value_heads, cpu_cfg.head_dim,
+            cpu_cfg.tie_word_embeddings);
+
+  auto raw_input_tokens = qwen_tokenizer.convertMessage(
+      mllm::models::qwen3::Qwen3Message{.prompt =
+           "提示:"
+           "海洋世界里，鲸鱼是地球上体型最为庞大的哺乳动物，它们拥有流线型的身躯，主要通过头顶的喷水孔进行呼吸。与终生生活在水"
+           "下并利用鱼鳃从水中提取溶解氧的鱼类有着本质区别。鲸鱼无法在水下直接呼吸氧气，因此它们需要耗费大量的体力，定时浮出水"
+           "面完成一次快速而彻底的换气过程。令人惊奇的是，当它们处于睡眠状态时，为了确保不会因为忘记呼吸而发生危险，它们只会关"
+           "闭大脑的一半来进行休息，另一半大脑则始终保持清醒和警觉，以便及时引导身体浮上水面。这种独特的生存机制是它们在深海中"
+           "延续生命的关键。问题：鲸鱼与鱼类在呼吸方式上的根本区别是什么？它们在睡觉时会采取什么特殊的措施来保证安全和生存？"})
+                              ["sequence"];
+  MLLM_INFO("Input tokens: {} tokens", raw_input_tokens.shape()[1]);
 
   std::unique_ptr<mllm::nn::StaticCache> shared_kv_cache = nullptr;
   std::unique_ptr<mllm::models::qwen_npu::QwenForCausalLM> npu_model;
+  std::unique_ptr<mllm::models::qwen_npu::QwenForCausalLMCPU> cpu_decode_model;
   int32_t prefill_seq_len = 0;
+  const int32_t required_cache_length = static_cast<int32_t>(raw_input_tokens.shape()[1]) + max_new_tokens + 16;
+  const int32_t shared_cache_length = std::min<int32_t>(cpu_cfg.max_cache_length, required_cache_length);
 
-  auto cpu_decode_model = mllm::models::qwen_npu::QwenForCausalLMCPU("", cpu_cfg);
-  auto cpu_param = mllm::load(cpu_decode_model_path, file_version);
-  cpu_decode_model.load(cpu_param);
-  MLLM_INFO("CPU decode model loaded from: {}", cpu_decode_model_path);
+  auto load_cpu_decode_model = [&]() {
+    MLLM_INFO("Constructing CPU decode model...");
+    auto model = std::make_unique<mllm::models::qwen_npu::QwenForCausalLMCPU>("", cpu_cfg);
+    MLLM_INFO("Loading CPU parameter file from: {}", cpu_decode_model_path);
+    auto cpu_param = mllm::load(cpu_decode_model_path, file_version);
+    MLLM_INFO("CPU parameter file loaded, binding weights...");
+    model->load(cpu_param);
+    MLLM_INFO("CPU decode model loaded from: {}", cpu_decode_model_path);
+
+    if (shared_kv_cache) {
+      auto& cpu_decode_blocks = model->text_model().decode_blocks();
+      for (int32_t layer_idx = 0; layer_idx < cpu_cfg.num_hidden_layers; ++layer_idx) {
+        auto& cpu_block = cpu_decode_blocks.list()[layer_idx];
+        auto& cpu_kv_cache = cpu_block.getKVCache();
+        cpu_kv_cache.setStaticCache(shared_kv_cache.get());
+        cpu_kv_cache.setLayerIndex(layer_idx);
+      }
+      MLLM_INFO("Configured {} CPU KVCache layers to use shared StaticCache", cpu_cfg.num_hidden_layers);
+    }
+
+    return model;
+  };
+
+  if (!use_npu_prefill) { cpu_decode_model = load_cpu_decode_model(); }
 
   // Setup shared KV cache for QNN prefill + CPU decode
   if (use_npu_prefill) {
     MLLM_INFO("Loading QNN model for prefill...");
     mllm::initQnnBackend();
     auto npu_cfg = mllm::models::qwen_npu::QwenNPUConfig(config_path);
+    npu_cfg.num_hidden_layers = cpu_cfg.num_hidden_layers;
 
-    shared_kv_cache = std::make_unique<mllm::nn::StaticCache>(
-        cpu_cfg.max_cache_length, cpu_cfg.num_hidden_layers, cpu_cfg.num_attention_heads, cpu_cfg.num_key_value_heads,
-        cpu_cfg.head_dim, mllm::kFloat32, mllm::kFloat32, mllm::kCPU, false);
-    MLLM_INFO("Created shared StaticCache with {} layers", cpu_cfg.num_hidden_layers);
-
+    MLLM_INFO("Constructing QNN prefill model...");
     npu_model = std::make_unique<mllm::models::qwen_npu::QwenForCausalLM>("", npu_cfg);
+    MLLM_INFO("QNN prefill model object constructed");
+    MLLM_INFO("Loading QNN parameter file from: {}", npu_model_path);
     auto npu_param = mllm::load(npu_model_path, file_version);
+    MLLM_INFO("QNN parameter file loaded, binding weights...");
     npu_model->load(npu_param);
     MLLM_INFO("QNN prefill model loaded from: {}", npu_model_path);
+
+    shared_kv_cache = std::make_unique<mllm::nn::StaticCache>(
+        shared_cache_length, cpu_cfg.num_hidden_layers, cpu_cfg.num_attention_heads, cpu_cfg.num_key_value_heads,
+        cpu_cfg.head_dim, mllm::kFloat32, mllm::kFloat32, mllm::kCPU, false);
+    MLLM_INFO("Created shared StaticCache with {} layers and capacity {}", cpu_cfg.num_hidden_layers,
+              shared_cache_length);
 
     // Configure QNN model KVCache layers to use shared StaticCache
     auto& npu_decode_blocks = npu_model->model.decode_blocks();
@@ -80,30 +131,9 @@ int main(int argc, char** argv) {
     }
     MLLM_INFO("Configured {} QNN KVCache layers to use shared StaticCache", cpu_cfg.num_hidden_layers);
 
-    // Configure CPU model KVCache layers to use shared StaticCache
-    auto& cpu_decode_blocks = cpu_decode_model.text_model().decode_blocks();
-    for (int32_t layer_idx = 0; layer_idx < cpu_cfg.num_hidden_layers; ++layer_idx) {
-      auto& cpu_block = cpu_decode_blocks.list()[layer_idx];
-      auto& cpu_kv_cache = cpu_block.getKVCache();
-      cpu_kv_cache.setStaticCache(shared_kv_cache.get());
-      cpu_kv_cache.setLayerIndex(layer_idx);
-    }
-    MLLM_INFO("Configured {} CPU KVCache layers to use shared StaticCache", cpu_cfg.num_hidden_layers);
   }
 
-  auto raw_input_tokens = qwen_tokenizer.convertMessage(
-      {.prompt =
-           "提示:"
-           "海洋世界里，鲸鱼是地球上体型最为庞大的哺乳动物，它们拥有流线型的身躯，主要通过头顶的喷水孔进行呼吸。与终生生活在水"
-           "下并利用鱼鳃从水中提取溶解氧的鱼类有着本质区别。鲸鱼无法在水下直接呼吸氧气，因此它们需要耗费大量的体力，定时浮出水"
-           "面完成一次快速而彻底的换气过程。令人惊奇的是，当它们处于睡眠状态时，为了确保不会因为忘记呼吸而发生危险，它们只会关"
-           "闭大脑的一半来进行休息，另一半大脑则始终保持清醒和警觉，以便及时引导身体浮上水面。这种独特的生存机制是它们在深海中"
-           "延续生命的关键。问题：鲸鱼与鱼类在呼吸方式上的根本区别是什么？它们在睡觉时会采取什么特殊的措施来保证安全和生存？"})
-                              ["sequence"];
-  MLLM_INFO("Input tokens: {} tokens", raw_input_tokens.shape()[1]);
-
   const int64_t eos_token_id = cpu_cfg.eos_token_id;
-  const int max_new_tokens = 512;
 
   mllm::models::ARGenerationOutputPast past{{"sequence", raw_input_tokens}};
   mllm::models::ARGenerationArgs args;
@@ -117,7 +147,7 @@ int main(int argc, char** argv) {
     prefill_seq_len = static_cast<int32_t>(raw_input_tokens.shape()[1]);
     mllm::models::ARGenerationArgs prefill_args;
     prefill_args["seq_len"] = prefill_seq_len;
-    auto prefill_output = cpu_decode_model.forward(past, prefill_args);
+    auto prefill_output = cpu_decode_model->forward(past, prefill_args);
 
     auto prefill_end = std::chrono::high_resolution_clock::now();
     auto prefill_duration = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_end - prefill_start);
@@ -215,6 +245,10 @@ int main(int argc, char** argv) {
       past["position_ids"] = mllm::Tensor::empty({1, 1}, mllm::kInt64, mllm::kCPU).alloc();
       past["position_ids"].at<mllm::mllm_int64_t>({0, 0}) = static_cast<mllm::mllm_int64_t>(prefill_seq_len);
     }
+
+    MLLM_INFO("Releasing QNN prefill model before CPU decode load...");
+    npu_model.reset();
+    cpu_decode_model = load_cpu_decode_model();
   }
 
   // Decode phase
@@ -226,7 +260,7 @@ int main(int argc, char** argv) {
 
   for (int step = decode_start_step; step < max_new_tokens; ++step) {
     auto step_start = std::chrono::high_resolution_clock::now();
-    auto output = cpu_decode_model.forward(past, args);
+    auto output = cpu_decode_model->forward(past, args);
     auto step_end = std::chrono::high_resolution_clock::now();
     auto step_duration = std::chrono::duration_cast<std::chrono::microseconds>(step_end - step_start);
     double step_time_ms = step_duration.count() / 1000.0;

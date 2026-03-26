@@ -343,10 +343,10 @@ Qnn_DataType_t mllmDataTypeToQnnDataType(DataTypes dtype) {
       ret = QNN_DATATYPE_FLOAT_32;
       break;
     }
-    // case kBFloat16: {
-    //   ret = QNN_DATATYPE_BFLOAT_16;
-    //   break;
-    // }
+    case kBFloat16: {
+      ret = QNN_DATATYPE_BFLOAT_16;
+      break;
+    }
     // FIXME: Maybe error here.
     case kInt4: {
       ret = QNN_DATATYPE_SFIXED_POINT_4;

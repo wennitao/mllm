@@ -215,6 +215,7 @@ endif()
 if(MLLM_PERFETTO_ENABLE)
   include_directories(third_party/perfetto/sdk)
   add_library(perfetto STATIC third_party/perfetto/sdk/perfetto.cc)
+  set_target_properties(perfetto PROPERTIES POSITION_INDEPENDENT_CODE ON)
   add_compile_definitions(MLLM_PERFETTO_ENABLE=1)
 endif()
 
@@ -242,6 +243,8 @@ if(NOT MLLM_ENABLE_PY_MLLM)
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
   set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 endif()
+
+add_subdirectory(perf)
 
 # Setup for installation.
 set(MLLM_INCLUDE_DIR
@@ -424,7 +427,11 @@ install(
 
 # Install tools
 # FIXME: Add other tools here
-install(TARGETS mllm-params-inspector mllm-quantizer DESTINATION bin)
+# Install tools
+# FIXME: Add other tools here
+if(MLLM_ENABLE_TOOLS)
+  install(TARGETS mllm-params-inspector mllm-quantizer DESTINATION bin)
+endif()
 
 # Final config and file copy.
 install(
