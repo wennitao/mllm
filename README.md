@@ -1,3 +1,4 @@
+```
 mllm-convertor   --input_path ~/models/Qwen3-0.6B/model.safetensors   --output_path ~/models/Qwen3-0.6B/qwen3-0.6B-cpu.mllm   --model_name qwen3   --format v2   --pipeline cast2fp32_pipeline   --verbose
 
 adb -P $PORT -s $DEVICE shell '
@@ -11,7 +12,7 @@ echo "Hello, introduce yourself." | ./mllm-qwen3-runner \
   -c config_0.6B_cpu.json
 '
 
-```
+
 DEVICE=d00e762e
 PORT=5041
 
@@ -50,9 +51,9 @@ adb -P $PORT -s $DEVICE shell "cd /data/local/tmp && \
 chmod +x ./mllm-qwen3-runner && \
 export LD_LIBRARY_PATH=. && \
 export ADSP_LIBRARY_PATH=/data/local/tmp && \
-```
 ./mllm-qwen3-runner \
 -m qwen3-0.6B-cpu.mllm \
 -mv v2 \
 -t tokenizer.json \
 -c config_0.6B_cpu.json"
+```
