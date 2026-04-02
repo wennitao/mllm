@@ -1,0 +1,58 @@
+{
+  "^model\\.layers\\.\\d+\\.self_attn\\.q_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [2048, 1024],
+      "replace": true
+    }
+  },
+  "^model\\.layers\\.\\d+\\.self_attn\\.k_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [1024, 1024],
+      "replace": true
+    }
+  },
+  "^model\\.layers\\.\\d+\\.self_attn\\.v_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [1024, 1024],
+      "replace": true
+    }
+  },
+  "^model\\.layers\\.\\d+\\.self_attn\\.o_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [1024, 2048],
+      "replace": true
+    }
+  },
+  "^model\\.layers\\.\\d+\\.mlp\\.gate_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [3072, 1024],
+      "replace": true
+    }
+  },
+  "^model\\.layers\\.\\d+\\.mlp\\.up_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [3072, 1024],
+      "replace": true
+    }
+  },
+  "^model\\.layers\\.\\d+\\.mlp\\.down_proj\\.weight$": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0",
+      "shape": [1024, 3072],
+      "replace": true
+    }
+  }
+}

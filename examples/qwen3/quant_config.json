@@ -1,0 +1,8 @@
+{
+  ".*\\.weight": {
+    "hints": {
+      "quant_method": "gguf",
+      "gguf_type": "Q4_0"
+    }
+  }
+}
