@@ -80,7 +80,14 @@ namespace mllm::cpu {
 
 #elif defined _MSC_VER
 #define MLLM_COMPUTE_FP16_TO_FP32(x) _mm_cvtss_f32(_mm_cvtph_ps(_mm_cvtsi32_si128(x)))
-#define MLLM_COMPUTE_FP32_TO_FP16(x) _mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(x), 0), 0)
+
+inline mllm_fp16_t fp32_to_fp16_x86(float x) {
+  uint16_t bits = _mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(x), 0), 0);
+  mllm_fp16_t result;
+  memcpy(&result, &bits, sizeof(uint16_t));
+  return result;
+}
+#define MLLM_COMPUTE_FP32_TO_FP16(x) fp32_to_fp16_x86(x)
 
 static float table_f32_f16[1 << 16];
 static bool table_f32_f16_init = false;
@@ -100,13 +107,25 @@ inline static float lookup_fp16_to_fp32(uint16_t f) {
   return table_f32_f16[s];
 }
 
-#define MLLM_FP16_TO_FP32(x) lookup_fp16_to_fp32(x)
+inline float fp16_to_fp32_msvc(mllm_fp16_t x) {
+  uint16_t bits;
+  memcpy(&bits, &x, sizeof(uint16_t));
+  return lookup_fp16_to_fp32(bits);
+}
+#define MLLM_FP16_TO_FP32(x) fp16_to_fp32_msvc(x)
 #define MLLM_FP32_TO_FP16(x) MLLM_COMPUTE_FP32_TO_FP16(x)
 
 #else
 namespace mllm::cpu {
 #define MLLM_COMPUTE_FP16_TO_FP32(x) _cvtsh_ss(x)
-#define MLLM_COMPUTE_FP32_TO_FP16(x) _cvtss_sh(x, 0)
+
+inline mllm_fp16_t fp32_to_fp16_x86(float x) {
+  uint16_t bits = _cvtss_sh(x, 0);
+  mllm_fp16_t result;
+  memcpy(&result, &bits, sizeof(uint16_t));
+  return result;
+}
+#define MLLM_COMPUTE_FP32_TO_FP16(x) fp32_to_fp16_x86(x)
 
 static float table_f32_f16[1 << 16];
 static bool table_f32_f16_init = false;
@@ -127,7 +146,12 @@ inline static float lookup_fp16_to_fp32(uint16_t f) {
 }
 
 #ifndef MLLM_FP16_TO_FP32
-#define MLLM_FP16_TO_FP32(x) lookup_fp16_to_fp32(x)
+inline float fp16_to_fp32_x86(mllm_fp16_t x) {
+  uint16_t bits;
+  memcpy(&bits, &x, sizeof(uint16_t));
+  return lookup_fp16_to_fp32(bits);
+}
+#define MLLM_FP16_TO_FP32(x) fp16_to_fp32_x86(x)
 #endif
 #ifndef MLLM_FP32_TO_FP16
 #define MLLM_FP32_TO_FP16(x) MLLM_COMPUTE_FP32_TO_FP16(x)

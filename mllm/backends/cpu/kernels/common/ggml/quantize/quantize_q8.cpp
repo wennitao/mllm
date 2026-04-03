@@ -41,7 +41,7 @@ void quantize_row_q8_0_reference(float* __restrict x, block_q8_0* __restrict y, 
       amax = MAX(amax, fabsf(v));
     }
 
-    const float d = amax / ((1 << 7) - 1);
+    const float d = fminf(amax / ((1 << 7) - 1), 65504.0f);
     const float id = d ? 1.0f / d : 0.0f;
 
     y[i].d = MLLM_FP32_TO_FP16(d);
@@ -88,7 +88,9 @@ void quantize_row_q8_0(const float* __restrict vx, void* __restrict vy, int k) {
 
     const float amax = vmaxvq_f32(amaxv[0]);
 
-    const float d = amax / ((1 << 7) - 1);
+    // Clamp to FP16 max (65504) to avoid storing Inf in y[i].d,
+    // which would cause 0*Inf=NaN in tinyBLAS dot products.
+    const float d = fminf(amax / ((1 << 7) - 1), 65504.0f);
     const float id = d ? 1.0f / d : 0.0f;
 
     y[i].d = MLLM_FP32_TO_FP16(d);
@@ -125,9 +127,10 @@ void quantize_row_q8_0(const float* __restrict vx, void* __restrict vy, int k) {
     const float maxScalar = _mm_cvtss_f32(max4);
 
     // Quantize these floats
-    const float d = maxScalar / 127.f;
+    // Clamp to FP16 max (65504) to avoid storing Inf in y[i].d.
+    const float d = fminf(maxScalar / 127.f, 65504.0f);
     y[i].d = MLLM_FP32_TO_FP16(d);
-    const float id = (maxScalar != 0.0f) ? 127.f / maxScalar : 0.0f;
+    const float id = (d != 0.0f) ? 1.0f / d : 0.0f;
     const __m256 mul = _mm256_set1_ps(id);
 
     // Apply the multiplier

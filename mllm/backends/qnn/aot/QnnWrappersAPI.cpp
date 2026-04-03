@@ -597,6 +597,15 @@ std::shared_ptr<QnnDeviceAndContext> QnnAOTEnv::createContext(const std::string&
     auto status = qnn_htp_func_symbols_.qnn_interface_.profileCreate(context->bk_handle_, QNN_PROFILE_LEVEL_DETAILED,
                                                                      &context->profile_bk_handle_);
     MLLM_RT_ASSERT_EQ(status, QNN_SUCCESS);
+
+    if (qnn_htp_func_symbols_.qnn_interface_.profileSetConfig != nullptr) {
+      QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
+      optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+      optraceConfig.enableOptrace = 1;
+      const QnnProfile_Config_t* configs[] = {&optraceConfig, nullptr};
+      auto configStatus = qnn_htp_func_symbols_.qnn_interface_.profileSetConfig(context->profile_bk_handle_, configs);
+      MLLM_RT_ASSERT_EQ(configStatus, QNN_SUCCESS);
+    }
   }
 
   // 4. Create Context

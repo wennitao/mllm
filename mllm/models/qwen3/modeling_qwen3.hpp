@@ -297,6 +297,17 @@ class Qwen3ForCausalLM : public ARGeneration, public nn::Module {
     registerBuffer("inv_freq", inv);
   }
 
+  void load(const ParameterFile::ptr_t& param_file) {
+    if (tie_word_embeddings_ && !param_file->has("lm_head_out.weight")) {
+      if (param_file->has("lm_head.weight")) {
+        param_file->push("lm_head_out.weight", param_file->pull("lm_head.weight"));
+      } else if (param_file->has("model.embed_tokens.weight")) {
+        param_file->push("lm_head_out.weight", param_file->pull("model.embed_tokens.weight"));
+      }
+    }
+    nn::Module::load(param_file);
+  }
+
   ARGenerationOutputPast forward(const ARGenerationOutputPast& input, const ARGenerationArgs& args) override {
     auto sequence = input.at("sequence");
 

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstring>
 #include <dlfcn.h>
+#include <functional>
 #include <fstream>
 #include <memory>
 
@@ -26,6 +27,87 @@
 
 namespace mllm::qnn {
 
+namespace {
+
+const char* qnnProfileEventTypeToString(QnnProfile_EventType_t type) {
+  switch (type) {
+    case QNN_PROFILE_EVENTTYPE_INIT:
+      return "INIT";
+    case QNN_PROFILE_EVENTTYPE_FINALIZE:
+      return "FINALIZE";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE:
+      return "EXECUTE";
+    case QNN_PROFILE_EVENTTYPE_NODE:
+      return "NODE";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_QUEUE_WAIT:
+      return "EXECUTE_QUEUE_WAIT";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_PREPROCESS:
+      return "EXECUTE_PREPROCESS";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_DEVICE:
+      return "EXECUTE_DEVICE";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_POSTPROCESS:
+      return "EXECUTE_POSTPROCESS";
+    case QNN_PROFILE_EVENTTYPE_DEINIT:
+      return "DEINIT";
+    case QNN_PROFILE_EVENTTYPE_TRACE:
+      return "TRACE";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char* qnnProfileEventUnitToString(QnnProfile_EventUnit_t unit) {
+  switch (unit) {
+    case QNN_PROFILE_EVENTUNIT_MICROSEC:
+      return "MICROSEC";
+    case QNN_PROFILE_EVENTUNIT_BYTES:
+      return "BYTES";
+    case QNN_PROFILE_EVENTUNIT_CYCLES:
+      return "CYCLES";
+    case QNN_PROFILE_EVENTUNIT_COUNT:
+      return "COUNT";
+    case QNN_PROFILE_EVENTUNIT_OBJECT:
+      return "OBJECT";
+    case QNN_PROFILE_EVENTUNIT_NONE:
+      return "NONE";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+std::string qnnScalarToString(const Qnn_Scalar_t& scalar) {
+  switch (scalar.dataType) {
+    case QNN_DATATYPE_FLOAT_32:
+      return std::to_string(scalar.floatValue);
+    case QNN_DATATYPE_FLOAT_64:
+      return std::to_string(scalar.doubleValue);
+    case QNN_DATATYPE_UINT_64:
+      return std::to_string(scalar.uint64Value);
+    case QNN_DATATYPE_INT_64:
+      return std::to_string(scalar.int64Value);
+    case QNN_DATATYPE_UINT_32:
+      return std::to_string(scalar.uint32Value);
+    case QNN_DATATYPE_INT_32:
+      return std::to_string(scalar.int32Value);
+    case QNN_DATATYPE_UINT_16:
+      return std::to_string(scalar.uint16Value);
+    case QNN_DATATYPE_INT_16:
+      return std::to_string(scalar.int16Value);
+    case QNN_DATATYPE_UINT_8:
+      return std::to_string(scalar.uint8Value);
+    case QNN_DATATYPE_INT_8:
+      return std::to_string(scalar.int8Value);
+    case QNN_DATATYPE_BOOL_8:
+      return scalar.bool8Value ? "true" : "false";
+    case QNN_DATATYPE_STRING:
+      return scalar.stringValue == nullptr ? "" : scalar.stringValue;
+    default:
+      return "<unsupported>";
+  }
+}
+
+}  // namespace
+
 QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
   // register ops
   regOpFactory<QNNAddOpFactory, QNNMulOpFactory, QNNGraphBeginOpFactory, QNNGraphEndOpFactory, QNNLinearOpFactory,
@@ -33,7 +115,7 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
                QNNParamOpFactory, QNNSiLUOpFactory, QNNEmbeddingOpFactory>();
 
   QnnLog_Level_t qnnLogLevel = QNN_LOG_LEVEL_ERROR;  // default QNN log level
-  profilingLevel_ = ProfilingLevel::OFF;
+  profilingLevel_ = ProfilingLevel::DETAILED;
   debug_ = false;  // when set true, NATIVE tensor will be regared as APP_READ tensor
 
   // Load QNN libraries and hold handles for lifecycle management
@@ -312,6 +394,26 @@ QNNRuntime* QNNRuntime::initRuntime(ProfilingLevel profilingLevel, QnnLog_Level_
   // Initialize Profiling
   Qnn_ProfileHandle_t profileHandle = nullptr;
   {
+    auto configureProfile = [&](Qnn_ProfileHandle_t handle) {
+      if (handle == nullptr || qnnInterface.profileSetConfig == nullptr) { return; }
+      if (qnnInterface.propertyHasCapability != nullptr &&
+          qnnInterface.propertyHasCapability(QNN_PROPERTY_PROFILE_SUPPORT_OPTRACE_CONFIG) != QNN_PROPERTY_SUPPORTED) {
+        MLLM_WARN("QNN backend does not advertise support for optrace profile config");
+        return;
+      }
+
+      QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
+      optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+      optraceConfig.enableOptrace = 1;
+      const QnnProfile_Config_t* configs[] = {&optraceConfig, nullptr};
+      auto status = qnnInterface.profileSetConfig(handle, configs);
+      if (QNN_PROFILE_NO_ERROR != status) {
+        MLLM_WARN("Unable to enable QNN optrace on profile handle, status={}", static_cast<int>(status));
+      } else {
+        MLLM_INFO("Enabled QNN optrace on profile handle");
+      }
+    };
+
     if (ProfilingLevel::OFF != profilingLevel) {
       MLLM_INFO("Profiling turned on; level = {}", (int)profilingLevel);
       if (ProfilingLevel::BASIC == profilingLevel) {
@@ -320,12 +422,14 @@ QNNRuntime* QNNRuntime::initRuntime(ProfilingLevel profilingLevel, QnnLog_Level_
           MLLM_WARN("Unable to create profile handle in the backend.");
           return nullptr;
         }
+        configureProfile(profileHandle);
       } else if (ProfilingLevel::DETAILED == profilingLevel) {
         MLLM_INFO("Detailed profiling requested. Creating Qnn Profile object.");
         if (QNN_PROFILE_NO_ERROR != qnnInterface.profileCreate(backendHandle, QNN_PROFILE_LEVEL_DETAILED, &profileHandle)) {
           MLLM_ERROR("Unable to create profile handle in the backend.");
           return nullptr;
         }
+        configureProfile(profileHandle);
       }
     }
   }
@@ -771,8 +875,6 @@ std::shared_ptr<QNNTensorWrapper> QNNBackend::getTensorWrapper(const std::string
 }
 
 void QNNBackend::extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle) {
-  // Extract profiling information from QNN backend
-  // This is a placeholder implementation
   if (profileHandle == nullptr) { return; }
 
   const QnnProfile_EventId_t* profileEvents{nullptr};
@@ -783,6 +885,70 @@ void QNNBackend::extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle) 
   }
 
   MLLM_INFO("Extracted {} profiling events", numEvents);
+
+  std::ofstream csv("qnn_profile.csv", std::ios::app);
+  if (csv.tellp() == 0) {
+    csv << "depth,parent_event_id,event_id,type,unit,value,timestamp_us,identifier\n";
+  }
+
+  std::function<void(QnnProfile_EventId_t, QnnProfile_EventId_t, uint32_t)> dumpEvent =
+      [&](QnnProfile_EventId_t eventId, QnnProfile_EventId_t parentEventId, uint32_t depth) {
+        const char* identifier = "";
+        QnnProfile_EventType_t type = 0;
+        QnnProfile_EventUnit_t unit = 0;
+        std::string valueStr;
+        uint64_t timestampUs = 0;
+
+        if (runtime_->qnnInterface.profileGetExtendedEventData != nullptr) {
+          QnnProfile_ExtendedEventData_t extendedEventData = QNN_PROFILE_EXTENDED_EVENT_DATA_INIT;
+          auto status = runtime_->qnnInterface.profileGetExtendedEventData(eventId, &extendedEventData);
+          if (QNN_PROFILE_NO_ERROR == status) {
+            type = extendedEventData.v1.type;
+            unit = extendedEventData.v1.unit;
+            identifier = extendedEventData.v1.identifier == nullptr ? "" : extendedEventData.v1.identifier;
+            timestampUs = extendedEventData.v1.timestamp;
+            if (unit == QNN_PROFILE_EVENTUNIT_OBJECT) {
+              valueStr = extendedEventData.v1.backendOpaqueObject.fileName == nullptr
+                             ? "<opaque-object>"
+                             : extendedEventData.v1.backendOpaqueObject.fileName;
+            } else {
+              valueStr = qnnScalarToString(extendedEventData.v1.value);
+            }
+          }
+        }
+
+        if (valueStr.empty() && runtime_->qnnInterface.profileGetEventData != nullptr) {
+          QnnProfile_EventData_t eventData = QNN_PROFILE_EVENT_DATA_INIT;
+          auto status = runtime_->qnnInterface.profileGetEventData(eventId, &eventData);
+          if (QNN_PROFILE_NO_ERROR == status) {
+            type = eventData.type;
+            unit = eventData.unit;
+            identifier = eventData.identifier == nullptr ? "" : eventData.identifier;
+            valueStr = std::to_string(eventData.value);
+          }
+        }
+
+        MLLM_INFO("QNN profile event depth={} id={} parent={} type={}({}) unit={} value={} timestamp_us={} identifier={}",
+                  depth, eventId, parentEventId, qnnProfileEventTypeToString(type), type, qnnProfileEventUnitToString(unit),
+                  valueStr.empty() ? "<n/a>" : valueStr, timestampUs, identifier);
+
+        if (csv.is_open()) {
+          csv << depth << "," << parentEventId << "," << eventId << "," << qnnProfileEventTypeToString(type) << ","
+              << qnnProfileEventUnitToString(unit) << ",\"" << (valueStr.empty() ? "<n/a>" : valueStr) << "\","
+              << timestampUs << ",\"" << identifier << "\"\n";
+        }
+
+        if (runtime_->qnnInterface.profileGetSubEvents == nullptr) { return; }
+
+        const QnnProfile_EventId_t* subEventIds{nullptr};
+        uint32_t numSubEvents{0};
+        auto status = runtime_->qnnInterface.profileGetSubEvents(eventId, &subEventIds, &numSubEvents);
+        if (QNN_PROFILE_NO_ERROR != status || subEventIds == nullptr || numSubEvents == 0) { return; }
+
+        for (uint32_t i = 0; i < numSubEvents; ++i) { dumpEvent(subEventIds[i], eventId, depth + 1); }
+      };
+
+  for (uint32_t i = 0; i < numEvents; ++i) { dumpEvent(profileEvents[i], 0, 0); }
 }
 
 }  // namespace mllm::qnn
