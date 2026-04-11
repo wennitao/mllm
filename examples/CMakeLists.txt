@@ -12,7 +12,6 @@ add_subdirectory(deepseek_ocr)
 
 if(MLLM_BUILD_QNN_BACKEND)
   add_subdirectory(qwen_npu)
-  add_subdirectory(qwen3_npu)
 endif()
 
 if(MLLM_TRACY_ENABLE)
@@ -23,4 +22,5 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE OR MLLM_BUILD_QNN_BACKEND)
   add_subdirectory(qwen3_qnn_aot)
   add_subdirectory(qwen2_qnn_aot)
   add_subdirectory(llama_qnn_aot)
+  add_subdirectory(qwen3_npu)
 endif()

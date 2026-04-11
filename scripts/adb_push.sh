@@ -20,11 +20,11 @@ adb push $OP_PATH/aarch64-android/libQnnLLaMAPackage.so /data/local/tmp/libQnnLL
 adb push $OP_PATH/hexagon-v79/libQnnLLaMAPackage.so /data/local/tmp/libQnnLLaMAPackage_HTP.so
 
 # Push mllm runner and libs to device
-adb push build-android-arm64-v8a/bin/*.so /data/local/tmp
+adb push build-android-arm64-v8a-qnn/bin/*.so /data/local/tmp
 adb push $NDK_LIBOMP /data/local/tmp
-adb push build-android-arm64-v8a/bin/mllm-qwen3-aot-runner /data/local/tmp
-adb push build-android-arm64-v8a/bin/mllm-qwen3-npu /data/local/tmp
-adb push build-android-arm64-v8a/bin/mllm-qwen3-runner /data/local/tmp
+adb push build-android-arm64-v8a-qnn/bin/mllm-qwen3-aot-runner /data/local/tmp
+adb push build-android-arm64-v8a-qnn/bin/mllm-qwen3-npu /data/local/tmp
+adb push build-android-arm64-v8a-qnn/bin/mllm-qwen3-runner /data/local/tmp
 
 # Push the runner-specific config file. Do not use the raw HuggingFace config.json here:
 # the AOT runner expects extra numeric fields such as max_cache_length.

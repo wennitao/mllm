@@ -1,201 +1,213 @@
+// Copyright (c) MLLM Team.
+// Licensed under the MIT License.
+//
+// Qwen3 NPU prefill + CPU decode.
+// Prefill runs on NPU using the proven SHA .bin (from compile_sha.cpp).
+// PromptProcessor handles all I/O setup, masking, and KV management exactly
+// as the working aot_run.cpp does. KV outputs are then handed to CPU decode.
+
 #include <chrono>
 #include <fmt/core.h>
 #include <iostream>
-#include <memory>
 #include <string>
+#include <vector>
+#include <algorithm>
 
-#include <mllm/backends/qnn/passes/QNNGraphBuildPass.hpp>
-#include <mllm/backends/qnn/passes/QNNGraphIOTensorPass.hpp>
-#include <mllm/backends/qnn/passes/QNNOpNamingPass.hpp>
-#include <mllm/compile/PassManager.hpp>
 #include <mllm/mllm.hpp>
+#include <mllm/backends/qnn/aot_rt/QnnAOTModule.hpp>
+#include <mllm/backends/qnn/aot_rt/KVCacheManager.hpp>
+#include <mllm/backends/qnn/aot_rt/QnnAOTConfig.hpp>
+#include <mllm/backends/qnn/aot_rt/PromptProcessor.hpp>
 #include <mllm/models/qwen3/modeling_qwen3.hpp>
 #include <mllm/models/qwen3/tokenization_qwen3.hpp>
-#include <mllm/nn/lmcache/StaticCache.hpp>
 #include <mllm/preprocessor/tokenizers/Unicode.hpp>
 #include <mllm/utils/Log.hpp>
 
-#include "modeling_qwen3_npu.hpp"
-
 using mllm::Argparse;
+using namespace mllm::qnn::aot;  // NOLINT
 
 namespace {
 
-auto parseModelVersion(const std::string& model_version) -> mllm::ModelFileVersion {
-  if (model_version == "v1") { return mllm::ModelFileVersion::kV1; }
-  if (model_version == "v2") { return mllm::ModelFileVersion::kV2; }
-  MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "Unsupported model_version: {} (expected v1 or v2)", model_version);
+auto parseModelVersion(const std::string& v) -> mllm::ModelFileVersion {
+  if (v == "v1") return mllm::ModelFileVersion::kV1;
+  if (v == "v2") return mllm::ModelFileVersion::kV2;
+  MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "Unsupported model_version: {}", v);
 }
 
-auto argmaxTokenId(const mllm::Tensor& logits) -> int64_t {
-  auto logits_f = logits;
-  logits_f = logits_f.to(mllm::kFloat32);
-  const auto& shape = logits_f.shape();
-  MLLM_RT_ASSERT_EQ(shape.size(), 3);
-  auto* data = logits_f.ptr<float>();
-  int64_t vocab_size = shape[2];
-  int64_t next_id = 0;
-  float max_logit = data[0];
-  for (int64_t i = 1; i < vocab_size; ++i) {
-    if (data[i] > max_logit) {
-      max_logit = data[i];
-      next_id = i;
-    }
-  }
-  return next_id;
+auto argmaxF32(mllm::Tensor logits) -> int64_t {
+  auto t    = logits.to(mllm::kFloat32);
+  auto* data = t.ptr<float>();
+  int64_t vocab = t.shape().back();
+  return std::distance(data, std::max_element(data, data + vocab));
 }
 
-void copyStaticCache(mllm::nn::StaticCache& src, mllm::nn::StaticCache& dst) {
-  MLLM_RT_ASSERT_EQ(src.getLayerNums(), dst.getLayerNums());
-  for (int32_t layer_idx = 0; layer_idx < src.getLayerNums(); ++layer_idx) {
-    src.getKCacheBuffer(layer_idx).copy2(dst.getKCacheBuffer(layer_idx));
-    src.getVCacheBuffer(layer_idx).copy2(dst.getVCacheBuffer(layer_idx));
-  }
-  dst.setCurrentSeqCnt(src.getCurrentSeqCnt(0));
+auto tokenTensor(int64_t token_id) -> mllm::Tensor {
+  auto token = mllm::Tensor::empty({1, 1}, mllm::kInt64, mllm::kCPU).alloc();
+  token.at<mllm::mllm_int64_t>({0, 0}) = static_cast<mllm::mllm_int64_t>(token_id);
+  return token;
 }
 
 }  // namespace
 
 MLLM_MAIN({
-  auto& help = Argparse::add<bool>("-h|--help").help("Show help message");
-  auto& npu_model_path =
-      Argparse::add<std::string>("--npu_model_path").help("QNN-prefill model path").required(true);
-  auto& cpu_model_path =
-      Argparse::add<std::string>("--cpu_model_path").help("CPU-decode model path").required(true);
-  auto& npu_config_path =
-      Argparse::add<std::string>("--npu_config_path").help("QNN-prefill config path").required(true);
-  auto& cpu_config_path =
-      Argparse::add<std::string>("--cpu_config_path").help("CPU-decode config path").required(true);
-  auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer_path").help("Tokenizer path").required(true);
-  auto& model_version =
-      Argparse::add<std::string>("-mv|--model_version").help("Model version").def("v2");
-  auto& max_new_tokens =
-      Argparse::add<int>("--max_new_tokens").help("Maximum decode steps").def(512);
+  auto& help           = Argparse::add<bool>("-h|--help").help("Show help");
+  auto& npu_bin_path   = Argparse::add<std::string>("--npu_bin").help("Pre-compiled NPU SHA .bin").required(true);
+  auto& cpu_model_path = Argparse::add<std::string>("--cpu_model").help("CPU decode model weights (.mllm)").required(true);
+  auto& config_path    = Argparse::add<std::string>("-c|--config").help("Model config JSON").required(true);
+  auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer").help("Tokenizer path").required(true);
+  auto& prefill_len    = Argparse::add<int>("--prefill_len").help("Prefill chunk size (must match SHA .bin)").def(32);
+  auto& max_new_tokens = Argparse::add<int>("--max_new_tokens").help("Max decode steps").def(512);
+  auto& model_version  = Argparse::add<std::string>("-mv|--model_version").def("v2");
 
   Argparse::parse(argc, argv);
-
-  if (help.isSet()) {
-    Argparse::printHelp();
-    return 0;
-  }
+  if (help.isSet()) { Argparse::printHelp(); return 0; }
 
 #ifdef MLLM_PERFETTO_ENABLE
   mllm::perf::start();
 #endif
 
   auto file_version = parseModelVersion(model_version.get());
+  auto cfg          = mllm::models::qwen3::Qwen3Config(config_path.get());
+  auto tokenizer    = mllm::models::qwen3::Qwen3Tokenizer(tokenizer_path.get());
 
-  auto tokenizer = mllm::models::qwen3::Qwen3Tokenizer(tokenizer_path.get());
-  auto cpu_cfg = mllm::models::qwen3::Qwen3Config(cpu_config_path.get());
-  auto npu_cfg = mllm::models::qwen3::Qwen3Config(npu_config_path.get());
+  // -----------------------------------------------------------------------
+  // 1. Load NPU SHA .bin and initialize PromptProcessor
+  // -----------------------------------------------------------------------
+  mllm::initQnnBackend(npu_bin_path.get());
 
-  auto cpu_model = mllm::models::qwen3::Qwen3ForCausalLM(cpu_cfg);
-  auto cpu_param = mllm::load(cpu_model_path.get(), file_version);
-  cpu_model.load(cpu_param);
-  MLLM_INFO("CPU decode model loaded from: {}", cpu_model_path.get());
+  QnnAOTConfig npu_cfg;
+  npu_cfg.num_layers  = cfg.num_hidden_layers;
+  npu_cfg.num_heads   = cfg.num_key_value_heads;
+  npu_cfg.head_dim    = cfg.head_dim;
+  npu_cfg.vocab_size  = cfg.vocab_size;
+  npu_cfg.context_len = cfg.max_cache_length;
+  npu_cfg.ar_len      = prefill_len.get();
+  npu_cfg.kv_dtype    = mllm::kUInt8;
 
-  mllm::initQnnBackend();
-  auto npu_model = mllm::models::qwen3_npu::Qwen3ForCausalLMPrefill("", npu_cfg);
-  auto npu_param = mllm::load(npu_model_path.get(), file_version);
-  npu_model.load(npu_param);
-  MLLM_INFO("QNN prefill model loaded from: {}", npu_model_path.get());
+  // KVCacheManager owns the KV cache buffers (same as aot_run.cpp)
+  auto backend    = mllm::Context::instance().getBackend(mllm::kQNN);
+  auto kv_manager = std::make_unique<KVCacheManager<uint8_t>>(npu_cfg);
+  kv_manager->initCache(backend->allocator().get(), npu_cfg.ar_len);
 
-  auto shared_kv_cache = std::make_unique<mllm::nn::StaticCache>(
-      cpu_cfg.max_cache_length, cpu_cfg.num_hidden_layers, cpu_cfg.num_attention_heads, cpu_cfg.num_key_value_heads,
-      cpu_cfg.head_dim, mllm::kFloat32, mllm::kFloat32, mllm::kCPU, false);
-  for (int32_t layer_idx = 0; layer_idx < cpu_cfg.num_hidden_layers; ++layer_idx) {
-    auto& kv_cache = npu_model.model.decode_blocks().list()[layer_idx].getKVCache();
-    kv_cache.setStaticCache(shared_kv_cache.get());
-    kv_cache.setLayerIndex(layer_idx);
-  }
+  auto prompt_processor = std::make_unique<PromptProcessor<uint8_t>>(kv_manager.get(), npu_cfg);
+  prompt_processor->init_io();
 
-  fmt::print("\n{:*^60}\n", " Qwen3 Mixed CLI ");
-  fmt::print("Prefill on QNN, decode on CPU\n");
-  fmt::print("Enter 'exit' or 'quit' to end the session\n\n");
+  MLLM_INFO("NPU SHA prefill ready (chunk={}, ctx={}).", npu_cfg.ar_len, npu_cfg.context_len);
 
-  std::string prompt_text;
-  fmt::print("💬 Prompt text (or 'exit/quit'): ");
-  std::getline(std::cin, prompt_text);
-  if (prompt_text == "exit" || prompt_text == "quit") {
-    mllm::shutdownContext();
-    return 0;
-  }
+  // -----------------------------------------------------------------------
+  // 2. Load CPU decode model
+  // -----------------------------------------------------------------------
+  auto cpu_params = mllm::load(cpu_model_path.get(), file_version);
+  auto cpu_model  = mllm::models::qwen3::Qwen3ForCausalLM(cfg);
+  cpu_model.load(cpu_params);
+  MLLM_INFO("CPU decode model loaded.");
 
-  auto raw_input_tokens = tokenizer.convertMessage({.prompt = prompt_text})["sequence"];
-  MLLM_INFO("Input tokens: {}", raw_input_tokens.shape()[1]);
+  // -----------------------------------------------------------------------
+  // 3. Interactive loop
+  // -----------------------------------------------------------------------
+  fmt::print("\n{:*^60}\n", " Qwen3 NPU-prefill + CPU-decode ");
+  fmt::print("Type 'exit' or 'quit' to quit.\n\n");
 
-  mllm::models::ARGenerationOutputPast past{{"sequence", raw_input_tokens}};
+  while (true) {
+    fmt::print("Prompt: ");
+    std::string prompt_text;
+    std::getline(std::cin, prompt_text);
+    if (prompt_text == "exit" || prompt_text == "quit") break;
+    if (prompt_text.empty()) continue;
 
-  MLLM_INFO("Building QNN graph for prefill...");
-  auto irs = npu_model.trace(past, {});
-  mllm::ir::PassManager rewrite_pm(irs["model"]);
-  rewrite_pm.reg(mllm::qnn::createQNNGraphIOTensorPass());
-  rewrite_pm.reg(mllm::qnn::createQNNOpNamingPass());
-  rewrite_pm.run();
+    auto raw_tokens = tokenizer.convertMessage({.prompt = prompt_text})["sequence"];
+    std::vector<int64_t> prompt_tokens;
+    prompt_tokens.reserve(raw_tokens.shape()[1]);
+    for (int i = 0; i < (int)raw_tokens.shape()[1]; ++i)
+      prompt_tokens.push_back(raw_tokens.ptr<int64_t>()[i]);
+    MLLM_INFO("Input tokens: {}", (int)prompt_tokens.size());
 
-  mllm::ir::PassManager graph_build_pm(irs["model"]);
-  graph_build_pm.reg(mllm::qnn::createQNNGraphBuildPass());
-  graph_build_pm.run();
+    // ------------------------------------------------------------------
+    // 4. NPU prefill via PromptProcessor (exactly as aot_run.cpp)
+    // ------------------------------------------------------------------
+    auto t_prefill_start = std::chrono::high_resolution_clock::now();
+    int64_t first_token_id = prompt_processor->prefill(prompt_tokens, /*start_pos=*/0);
+    auto t_prefill_end = std::chrono::high_resolution_clock::now();
 
-  npu_model.model.clearKVCache();
+    double prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            t_prefill_end - t_prefill_start).count();
+    MLLM_INFO("NPU prefill: {:.2f}s, first token={}", prefill_ms / 1000.0, first_token_id);
 
-  MLLM_INFO("Starting QNN prefill...");
-  auto prefill_start = std::chrono::high_resolution_clock::now();
-  mllm::models::ARGenerationArgs prefill_args;
-  prefill_args["seq_len"] = static_cast<int>(raw_input_tokens.shape()[1]);
-  auto prefill_output = npu_model.forward(past, prefill_args);
-  auto prefill_end = std::chrono::high_resolution_clock::now();
-  auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_end - prefill_start).count();
-  MLLM_INFO("QNN prefill completed in {:.2f}s", prefill_ms / 1000.0);
+    std::string first_token_str = mllm::preprocessor::wideString2Utf8String(
+        tokenizer.detokenize(first_token_id));
+    MLLM_INFO("First token: {} ({})", first_token_str, first_token_id);
+    std::cout << first_token_str << std::flush;
 
-  copyStaticCache(*shared_kv_cache, cpu_model.kvCache());
+    // ------------------------------------------------------------------
+    // 5. CPU prefill (baseline + KV cache population)
+    //    Run the full prompt through the CPU model to:
+    //      a) get the "golden" first token for NPU correctness verification
+    //      b) populate the CPU KV cache so decode has full context
+    // ------------------------------------------------------------------
+    cpu_model.kvCache().clearCache();
 
-  auto first_next_id = argmaxTokenId(prefill_output["sequence"]);
+    mllm::models::ARGenerationOutputPast cpu_prefill_past;
+    cpu_prefill_past["sequence"] = raw_tokens;  // full prompt, int64 [1, seq_len]
 
-  past["sequence"] = mllm::Tensor::empty({1, 1}, mllm::kInt64, mllm::kCPU).alloc();
-  past["sequence"].at<mllm::mllm_int64_t>({0, 0}) = static_cast<mllm::mllm_int64_t>(first_next_id);
-  past["position_ids"] = prefill_output["position_ids"];
+    mllm::models::ARGenerationArgs decode_args;
 
-  std::cout << mllm::preprocessor::wideString2Utf8String(tokenizer.detokenize(first_next_id)) << std::flush;
+    auto t_cpu_prefill_start = std::chrono::high_resolution_clock::now();
+    auto cpu_prefill_out = cpu_model.forward(cpu_prefill_past, decode_args);
+    auto t_cpu_prefill_end = std::chrono::high_resolution_clock::now();
+    double cpu_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                t_cpu_prefill_end - t_cpu_prefill_start).count();
 
-  const auto eos_token_id = cpu_cfg.eos_token_id;
-  mllm::models::ARGenerationArgs decode_args;
-  decode_args["debug_layer_outputs"] = false;
+    int64_t cpu_first_token_id = argmaxF32(cpu_prefill_out.at("sequence"));
+    std::string cpu_first_token_str = mllm::preprocessor::wideString2Utf8String(
+        tokenizer.detokenize(cpu_first_token_id));
 
-  double total_decode_time_ms = 0.0;
-  int decode_count = 0;
+    MLLM_INFO("CPU prefill:  {:.2f}s, first token={} ({})", cpu_prefill_ms / 1000.0,
+              cpu_first_token_id, cpu_first_token_str);
+    MLLM_INFO("NPU prefill:  first token={} ({})", first_token_id, first_token_str);
+    if (cpu_first_token_id == first_token_id) {
+      MLLM_INFO("NPU first token MATCHES CPU. Prefill correct.");
+    } else {
+      MLLM_INFO("NPU first token MISMATCH. NPU={} CPU={}", first_token_id, cpu_first_token_id);
+    }
 
-  MLLM_INFO("Starting CPU decode...");
-  for (int step = 1; step < max_new_tokens.get(); ++step) {
-    auto step_start = std::chrono::high_resolution_clock::now();
-    auto output = cpu_model.forward(past, decode_args);
-    auto step_end = std::chrono::high_resolution_clock::now();
-    auto step_us = std::chrono::duration_cast<std::chrono::microseconds>(step_end - step_start).count();
-    auto step_time_ms = step_us / 1000.0;
+    // Continue decode from CPU KV cache. The CPU prefill output contains
+    // logits, so replace "sequence" with the sampled first token before the
+    // first decode step.
+    auto past = std::move(cpu_prefill_out);
+    past["sequence"] = tokenTensor(first_token_id);
 
-    auto next_id = argmaxTokenId(output["sequence"]);
-    std::cout << mllm::preprocessor::wideString2Utf8String(tokenizer.detokenize(next_id)) << std::flush;
+    double total_decode_ms = 0.0;
+    int    decode_count    = 0;
 
-    total_decode_time_ms += step_time_ms;
-    decode_count++;
+    MLLM_INFO("Starting CPU decode from token={}...", first_token_id);
+    for (int step = 1; step < max_new_tokens.get(); ++step) {
+      auto t0    = std::chrono::high_resolution_clock::now();
+      auto output = cpu_model.forward(past, decode_args);
+      auto t1    = std::chrono::high_resolution_clock::now();
+      total_decode_ms += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
+      decode_count++;
 
-    past = std::move(output);
-    past["sequence"] = mllm::Tensor::empty({1, 1}, mllm::kInt64, mllm::kCPU).alloc();
-    past["sequence"].at<mllm::mllm_int64_t>({0, 0}) = static_cast<mllm::mllm_int64_t>(next_id);
+      auto next_id = argmaxF32(output["sequence"]);
+      std::cout << mllm::preprocessor::wideString2Utf8String(tokenizer.detokenize(next_id))
+                << std::flush;
 
-    if (next_id == eos_token_id) { break; }
-  }
+      past = std::move(output);
+      past["sequence"] = tokenTensor(next_id);
 
-  std::cout << "\n";
-  if (decode_count > 0) {
-    auto avg_time_ms = total_decode_time_ms / decode_count;
-    MLLM_INFO("Decode completed: {} tokens, avg {:.2f}ms/token, throughput {:.2f} tok/s", decode_count, avg_time_ms,
-              decode_count / (total_decode_time_ms / 1000.0));
-  }
+      if (next_id == cfg.eos_token_id) break;
+    }
+
+    std::cout << "\n";
+    if (decode_count > 0) {
+      MLLM_INFO("Decode: {} tokens, avg {:.2f}ms/tok ({:.2f} tok/s)",
+                decode_count, total_decode_ms / decode_count,
+                decode_count / (total_decode_ms / 1000.0));
+    }
+  }  // end while(true)
 
 #ifdef MLLM_PERFETTO_ENABLE
   mllm::perf::stop();
-  mllm::perf::saveReport("qwen3_mixed.perfetto");
+  mllm::perf::saveReport("qwen3_npu_prefill.perfetto");
 #endif
 
   mllm::shutdownContext();

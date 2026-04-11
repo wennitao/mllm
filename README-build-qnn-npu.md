@@ -44,6 +44,8 @@ adb push $ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/li
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --npu_model_path /data/local/tmp/qwen3_1.7b_q4.mllm --cpu_model_path qwen3_1.7b.mllm --npu_config_path config_1.7B_q4.json --cpu_config_path config_1.7B_cpu.json --tokenizer_path qwen3-tokenizer.json --model_version v2"
 ```
 
+## Run on CPU
+
 QQUF Q4
 ```
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-runner --model_path qwen3_1.7b_q4.mllm --model_version v2 --config_path config_1.7B_q4.json --tokenizer_path qwen3-tokenizer.json"
@@ -54,7 +56,36 @@ FP32
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-runner --model_path qwen3_1.7b.mllm --model_version v2 --config_path config_1.7B_cpu.json --tokenizer_path qwen3-tokenizer.json"
 ```
 
+w4a8-i8mm-kai
+```
+adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-runner --model_path qwen3_1.7b_kai.mllm --model_version v2 --config_path config_1.7B_kai.json --tokenizer_path qwen3-tokenizer.json"
+```
+
 Run on server
 ```
 ./build-sdk-x86/bin/mllm-qwen3-runner --model_path Qwen3-1.7b-mllm/qwen3_1.7b_q4.mllm --model_version v2 --config_path examples/qwen3_npu/config_1.7B_q4.json --tokenizer_path Qwen3-1.7b/tokenizer.json
+```
+
+## PTQ
+
+```
+CUDA_VISIBLE_DEVICES=1 python train_w8a16.py --model_path /mnt/raid0_ssd/wentao/mllm/Qwen3-1.7b/ --max_length 1024 --num_samples 128 --output_dir /mnt/raid0_ssd/wentao/mllm/Qwen3-1.7b-mllm/
+
+mllm-convertor --input_path Qwen3-1.7b-mllm/model.safetensors --output_path Qwen3-1.7b-mllm/qwen3_1.7b_ptq_npu.mllm --verbose --model_name qwen3
+```
+
+## Prefill on NPU, decode on CPU
+
+**We use the aot weight and following compile pipeline for npu prefill.**
+
+The ptq model weights (`qwen3_1.7b_ptq_lpbq.mllm`) come from the same process as QNN AOT example: first PTQ train, and then mllm-convert. 
+
+Compile
+```
+LD_LIBRARY_PATH=/tmp/mllm-qnn-host-libs:/mnt/raid0_ssd/wentao/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/lib/:$LD_LIBRARY_PATH ./build-qnn-aot/bin/mllm-qwen3-npu-compile -m Qwen3-1.7b-mllm/qwen3_1.7b_ptq_lpbq.mllm -c examples/qwen3_qnn_aot/config_1.7B.json --aot_config examples/qwen3_qnn_aot/qnn_aot_cfg_1.7B.json
+```
+
+Run on device
+```
+adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --npu_bin qwen3_npu_prefill.bin --cpu_model qwen3_1.7b_q4.mllm --model_version v2 --config config_1.7B_q4.json --tokenizer qwen3-tokenizer.json"
 ```
