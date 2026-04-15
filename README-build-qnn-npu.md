@@ -80,8 +80,21 @@ mllm-convertor --input_path Qwen3-1.7b-mllm/model.safetensors --output_path Qwen
 
 The ptq model weights (`qwen3_1.7b_ptq_lpbq.mllm`) come from the same process as QNN AOT example: first PTQ train, and then mllm-convert. 
 
+Generate quantized `model.safetensors`
+```
+cd ./pymllm/backends/qualcomm/transformers/qwen3
+python train.py --model_path "/your/qwen3/model/path/" --max_length 1024 --num_samples 128 --output_dir "/path/to/output"
+```
+
+Convert to `.mllm`
+```
+mllm-convertor --input_path /path/to/output/model.safetensors --output_path /path/to/output/qwen3_1.7b_ptq_lpbq.mllm --verbose
+```
+
 Compile
 ```
+python task.py tasks/build_x86_qnn_aot.yaml
+
 LD_LIBRARY_PATH=/tmp/mllm-qnn-host-libs:/mnt/raid0_ssd/wentao/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/lib/:$LD_LIBRARY_PATH ./build-qnn-aot/bin/mllm-qwen3-npu-compile -m Qwen3-1.7b-mllm/qwen3_1.7b_ptq_lpbq.mllm -c examples/qwen3_qnn_aot/config_1.7B.json --aot_config examples/qwen3_qnn_aot/qnn_aot_cfg_1.7B.json
 ```
 
