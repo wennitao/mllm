@@ -46,7 +46,7 @@ adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --
 
 ## Run on CPU
 
-QQUF Q4
+GGUF Q4
 ```
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-runner --model_path qwen3_1.7b_q4.mllm --model_version v2 --config_path config_1.7B_q4.json --tokenizer_path qwen3-tokenizer.json"
 ```
@@ -61,7 +61,15 @@ w4a8-i8mm-kai
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-runner --model_path qwen3_1.7b_kai.mllm --model_version v2 --config_path config_1.7B_kai.json --tokenizer_path qwen3-tokenizer.json"
 ```
 
-Run on server
+## Run on GPU (OpenCL)
+
+GGUF Q4
+```
+adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-opencl-runner --model_path qwen3_1.7b_q4.mllm --model_version v2 --config_path config_1.7B_q4.json --tokenizer_path qwen3-tokenizer.json"
+```
+
+## Run on server
+
 ```
 ./build-sdk-x86/bin/mllm-qwen3-runner --model_path Qwen3-1.7b-mllm/qwen3_1.7b_q4.mllm --model_version v2 --config_path examples/qwen3_npu/config_1.7B_q4.json --tokenizer_path Qwen3-1.7b/tokenizer.json
 ```
@@ -101,4 +109,6 @@ LD_LIBRARY_PATH=/tmp/mllm-qnn-host-libs:/mnt/raid0_ssd/wentao/android-ndk-r29/to
 Run on device
 ```
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --npu_bin qwen3_npu_prefill.bin --cpu_model qwen3_1.7b_q4.mllm --model_version v2 --config config_1.7B_q4.json --tokenizer qwen3-tokenizer.json"
+
+adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --npu_bin qwen3_npu_prefill.bin --cpu_model qwen3_1.7b_kai.mllm --model_version v2 --config config_1.7B_kai.json --tokenizer qwen3-tokenizer.json"
 ```

@@ -18,7 +18,7 @@
 #include <mllm/backends/qnn/aot_rt/KVCacheManager.hpp>
 #include <mllm/backends/qnn/aot_rt/QnnAOTConfig.hpp>
 #include <mllm/backends/qnn/aot_rt/PromptProcessor.hpp>
-#include <mllm/models/qwen3/modeling_qwen3.hpp>
+#include <mllm/models/qwen3/modeling_qwen3_fa2.hpp>
 #include <mllm/models/qwen3/tokenization_qwen3.hpp>
 #include <mllm/preprocessor/tokenizers/Unicode.hpp>
 #include <mllm/utils/Log.hpp>
@@ -131,7 +131,7 @@ MLLM_MAIN({
 
     double prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             t_prefill_end - t_prefill_start).count();
-    MLLM_INFO("NPU prefill: {:.2f}s, first token={}", prefill_ms / 1000.0, first_token_id);
+    MLLM_INFO("NPU prefill: {:.2f}ms, first token={}", prefill_ms, first_token_id);
 
     std::string first_token_str = mllm::preprocessor::wideString2Utf8String(
         tokenizer.detokenize(first_token_id));
@@ -161,7 +161,7 @@ MLLM_MAIN({
     std::string cpu_first_token_str = mllm::preprocessor::wideString2Utf8String(
         tokenizer.detokenize(cpu_first_token_id));
 
-    MLLM_INFO("CPU prefill:  {:.2f}s, first token={} ({})", cpu_prefill_ms / 1000.0,
+    MLLM_INFO("CPU prefill:  {:.2f}ms, first token={} ({})", cpu_prefill_ms,
               cpu_first_token_id, cpu_first_token_str);
     MLLM_INFO("NPU prefill:  first token={} ({})", first_token_id, first_token_str);
     if (cpu_first_token_id == first_token_id) {
