@@ -21,6 +21,7 @@
 #include "mllm/nn/layers/Conv2D.hpp"          // IWYU pragma: export
 #include "mllm/nn/layers/Conv3D.hpp"          // IWYU pragma: export
 #include "mllm/nn/layers/CausalMask.hpp"      // IWYU pragma: export
+#include "mllm/nn/layers/TopKMask.hpp"        // IWYU pragma: export
 #include "mllm/nn/layers/RoPE.hpp"            // IWYU pragma: export
 #include "mllm/nn/layers/MultimodalRoPE.hpp"  // IWYU pragma: export
 #include "mllm/nn/layers/Param.hpp"           // IWYU pragma: export

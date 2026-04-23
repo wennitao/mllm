@@ -9,6 +9,7 @@
 #include "mllm/backends/cpu/ops/AvgPool1dOp.hpp"
 #include "mllm/backends/cpu/ops/CastTypeOp.hpp"
 #include "mllm/backends/cpu/ops/CausalMaskOp.hpp"
+#include "mllm/backends/cpu/ops/TopKMaskOp.hpp"
 #include "mllm/backends/cpu/ops/CloneOp.hpp"
 #include "mllm/backends/cpu/ops/CmpOp.hpp"
 #include "mllm/backends/cpu/ops/ConcatOp.hpp"
@@ -77,7 +78,7 @@ CPUBackend::CPUBackend() : Backend(kCPU, createCPUAllocator()) {
                CPUViewOpFactory, CPULayerNormOpFactory, CPURepeatOpFactory, CPUX2XOpFactory, CPUSoftmaxOpFactory,
                CPUSiLUOpFactory, CPUSigmoidOpFactory, CPURMSNormOpFactory, CPUGELUOpFactory, CPUQuickGELUOpFactory,
                CPUReLUOpFactory, CPUMatMulOpFactory, CPUFlashAttention2OpFactory, CPUSliceOpFactory, CPUVisionRoPEOpFactory,
-               CPUParamOpFactory, CPUMultimodalRoPEOpFactory, CPURoPEOpFactory, CPUCausalMaskOpFactory, CPUConv1DOpFactory,
+               CPUParamOpFactory, CPUMultimodalRoPEOpFactory, CPURoPEOpFactory, CPUCausalMaskOpFactory, CPUTopKMaskOpFactory, CPUConv1DOpFactory,
                CPUConv3DOpFactory, CPUSTFTOpFactory, CPUISTFTOpFactory, CPUIndexOpFactory, CPUTopKOpFactory, CPUClipOpFactory,
                CPUMeanOpFactory, CPUKVCacheOpFactory, CPUPagedAttnOpFactory, CPUScatter2ShardsOpFactory, CPURadixAttnOpFactory,
                CPUConv2DOpFactory, CPULayerNorm2DOpFactory, CPUInterpolateOpFactory, CPUPadOpFactory, CPUMaskedScatterOpFactory,

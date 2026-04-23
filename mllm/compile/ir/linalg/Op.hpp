@@ -81,6 +81,7 @@ class RadixAttnSwaSinkOp;
 class EqualOp;
 class WhereOp;
 class SigmoidOp;
+class TopKMaskOp;
 }  // namespace mllm
 
 #define LINALG_AOPS_DEFINE(class_name, rtti_name)                                                                       \
@@ -188,6 +189,7 @@ LINALG_AOPS_DEFINE(TransposeOp, TRANSPOSEOP);
 LINALG_AOPS_DEFINE(RMSNormOp, RMSNORMOP);
 LINALG_AOPS_DEFINE(SiLUOp, SILUOP);
 LINALG_AOPS_DEFINE(SigmoidOp, SIGMOIDOP);
+LINALG_AOPS_DEFINE(TopKMaskOp, TOPKMASKOP);
 
 LINALG_AOPS_DEFINE(CastTypeOp, CASTTYPEOP);
 

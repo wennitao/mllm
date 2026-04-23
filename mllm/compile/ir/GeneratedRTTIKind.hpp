@@ -86,6 +86,7 @@ enum NodeKind : uint32_t {
   RK_Op_LinalgIROp_EqualOp,
   RK_Op_LinalgIROp_WhereOp,
   RK_Op_LinalgIROp_SigmoidOp,
+  RK_Op_LinalgIROp_TopKMaskOp,
   RK_Op_LinalgIROp_CustomizedOp,
   RK_Op_LinalgIROp_Last,
   RK_Op_GraphIROp,

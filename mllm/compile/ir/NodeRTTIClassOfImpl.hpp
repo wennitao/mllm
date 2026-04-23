@@ -229,6 +229,9 @@ struct NodeRTTIClassOfImpl {
 #define RTTI_RK_OP_LINALGIROP_SIGMOIDOP_IMPL(v) \
   return (v)->getKind() >= RK_Op_LinalgIROp_SigmoidOp && (v)->getKind() <= RK_Op_LinalgIROp_SigmoidOp
 
+#define RTTI_RK_OP_LINALGIROP_TOPKMASKOP_IMPL(v) \
+  return (v)->getKind() >= RK_Op_LinalgIROp_TopKMaskOp && (v)->getKind() <= RK_Op_LinalgIROp_TopKMaskOp
+
 #define RTTI_RK_OP_LINALGIROP_CUSTOMIZEDOP_IMPL(v) \
   return (v)->getKind() >= RK_Op_LinalgIROp_CustomizedOp && (v)->getKind() <= RK_Op_LinalgIROp_CustomizedOp
 
