@@ -16,8 +16,11 @@ adb push $ANDR_LIB/libQnnHtpV79CalculatorStub.so /data/local/tmp
 adb push $QNN_SDK_ROOT/lib/hexagon-v79/unsigned/libQnnHtpV79Skel.so /data/local/tmp
 adb push $QNN_SDK_ROOT/lib/aarch64-android/libQnnSystem.so /data/local/tmp
 
+# ARM prepare requires both op packages to be registered:
+#   libQnnLLaMAPackage_CPU.so -> target CPU
+#   libQnnLLaMAPackage.so     -> target HTP, loaded by the skel via ADSP_LIBRARY_PATH
 adb push $OP_PATH/aarch64-android/libQnnLLaMAPackage.so /data/local/tmp/libQnnLLaMAPackage_CPU.so
-adb push $OP_PATH/hexagon-v79/libQnnLLaMAPackage.so /data/local/tmp/libQnnLLaMAPackage_HTP.so
+adb push $OP_PATH/hexagon-v79/libQnnLLaMAPackage.so /data/local/tmp/libQnnLLaMAPackage.so
 
 # Push mllm runner and libs to device
 adb push build-android-arm64-v8a/bin/*.so /data/local/tmp

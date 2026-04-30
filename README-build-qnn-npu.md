@@ -72,6 +72,8 @@ adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-opencl
 
 ```
 ./build-sdk-x86/bin/mllm-qwen3-runner --model_path Qwen3-1.7b-mllm/qwen3_1.7b_q4.mllm --model_version v2 --config_path examples/qwen3_npu/config_1.7B_q4.json --tokenizer_path Qwen3-1.7b/tokenizer.json
+
+./build-sdk-x86/bin/mllm-qwen3-topk-runner --model_path Qwen3-1.7b-mllm/qwen3_1.7b_q4.mllm --model_version v2 --config_path examples/qwen3_npu/config_1.7B_q4.json --tokenizer_path Qwen3-1.7b/tokenizer.json
 ```
 
 ## PTQ
@@ -103,7 +105,7 @@ Compile
 ```
 python task.py tasks/build_x86_qnn_aot.yaml
 
-LD_LIBRARY_PATH=/tmp/mllm-qnn-host-libs:/mnt/raid0_ssd/wentao/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/lib/:$LD_LIBRARY_PATH ./build-qnn-aot/bin/mllm-qwen3-npu-compile -m Qwen3-1.7b-mllm/qwen3_1.7b_ptq_lpbq.mllm -c examples/qwen3_qnn_aot/config_1.7B.json --aot_config examples/qwen3_qnn_aot/qnn_aot_cfg_1.7B.json
+LD_LIBRARY_PATH=/tmp/mllm-qnn-host-libs:/mnt/raid0_ssd/wentao/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/lib/:$LD_LIBRARY_PATH ./build-qnn-aot/bin/mllm-qwen3-npu-compile -m Qwen3-1.7b-mllm/qwen3_1.7b_ptq_lpbq.mllm -c examples/qwen3_npu/config_1.7B_kai.json --aot_config examples/qwen3_qnn_aot/qnn_aot_cfg_1.7B.json
 ```
 
 Run on device
@@ -111,4 +113,10 @@ Run on device
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --npu_bin qwen3_npu_prefill.bin --cpu_model qwen3_1.7b_q4.mllm --model_version v2 --config config_1.7B_q4.json --tokenizer qwen3-tokenizer.json"
 
 adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && ./mllm-qwen3-npu --npu_bin qwen3_npu_prefill.bin --cpu_model qwen3_1.7b_kai.mllm --model_version v2 --config config_1.7B_kai.json --tokenizer qwen3-tokenizer.json"
+```
+
+## Testing NPU Operators
+
+```
+adb shell "cd /data/local/tmp && export LD_LIBRARY_PATH=. && MLLM_QNN_FA_TIMING_RUNS=1 && ./Mllm-Test-QNN-FlashAttentionOp"
 ```
