@@ -15,6 +15,7 @@ extern const char* rope;
 extern const char* silu;
 extern const char* add;
 extern const char* matmul;
+extern const char* flash_attn;
 const std::map<std::string, const char*> OpenCLProgramMap = {
     {"transpose", transpose},
     {"rmsnorm", rmsnorm},
@@ -30,6 +31,7 @@ const std::map<std::string, const char*> OpenCLProgramMap = {
     {"silu", silu},
     {"add", add},
     {"matmul", matmul},
+    {"flash_attn", flash_attn},
 };
 }  // namespace mllm::opencl
 const std::map<std::string, std::string> OpenCLProgramMd5Map = {

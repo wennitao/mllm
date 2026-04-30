@@ -18,6 +18,8 @@ class OpenCLRoPEOp final : public aops::RoPEOp {
  private:
   std::shared_ptr<KernelWrap> kernel_f32_ = nullptr;
   std::shared_ptr<KernelWrap> kernel_f16_ = nullptr;
+  std::shared_ptr<KernelWrap> kernel_bshd_f32_ = nullptr;
+  std::shared_ptr<KernelWrap> kernel_bshd_f16_ = nullptr;
 };
 
 class OpenCLRoPEOpFactory : public TypedOpFactory<OpTypes::kRoPE, aops::RoPEOpOptions> {

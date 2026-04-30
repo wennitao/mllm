@@ -30,118 +30,37 @@ inline float dequantize_q4_0(const __global block_q4_0 *blocks, int index) {
 }
 
 __kernel void rmsnorm_f32_q4(
-    __global const float *src,    // Input tensor (fp32)
-    __global float *dst,          // Output tensor (fp32)
-    __global const void *weights, // Weight tensor (can be fp32 or q4_0)
-    const int weight_is_q4, // Flag: 0 means weights are fp32, 1 means q4_0
-    const int D,            // Dimension, i.e., length of each row
-    const float epsilon,    // Epsilon value to prevent division by zero
-    const int
-        add_unit_offset // Flag: whether to perform +1 operation on weights
+    __global const void *src_void, // Input tensor (fp32)
+    __global void *dst_void,       // Output tensor (fp32)
+    __global const void *weights,  // Weight tensor (can be fp32 or q4_0)
+    const int weight_is_q4,        // Flag: 0 means weights are fp32, 1 means q4_0
+    const int D,                   // Dimension, i.e., length of each row
+    const float epsilon,           // Epsilon value to prevent division by zero
+    const int add_unit_offset,     // Flag: whether to perform +1 operation on weights
+    const ulong src_offset_bytes,  // Byte offset into src buffer
+    const ulong dst_offset_bytes   // Byte offset into dst buffer
 ) {
-  // 1. Get IDs
-  const int row_id = get_group_id(
-      0); // Each workgroup processes one row, row ID determined by workgroup ID
-  const int local_id = get_local_id(0); // Thread ID within workgroup
+  __global const float *src = (__global const float *)((const __global char *)src_void + src_offset_bytes);
+  __global float *dst       = (__global float *)((__global char *)dst_void + dst_offset_bytes);
 
-  // 2. Declare shared array in local memory
+  const int row_id   = get_group_id(0);
+  const int local_id = get_local_id(0);
+
   __local float local_sum_sq[RMSNORM_WG_SIZE];
 
-  // 3. Parallel computation of sum of squares
-  float thread_sum_sq =
-      0.0f; // Each thread calculates sum of squares for part of elements
+  float thread_sum_sq = 0.0f;
   for (int i = local_id; i < D; i += RMSNORM_WG_SIZE) {
     float val = src[row_id * D + i];
     thread_sum_sq += val * val;
   }
   local_sum_sq[local_id] = thread_sum_sq;
 
-  // 4. Workgroup reduction to compute total sum of squares for the entire row
   barrier(CLK_LOCAL_MEM_FENCE);
   for (int s = RMSNORM_WG_SIZE / 2; s > 0; s >>= 1) {
-    if (local_id < s) {
-      local_sum_sq[local_id] += local_sum_sq[local_id + s];
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-  }
-  // At this point, local_sum_sq[0] contains the sum of squares for the entire
-  // row
-
-  // 5. Calculate RMS scaling factor and broadcast safely
-  float rms_val;
-  // Only the first thread in the workgroup performs this scalar calculation
-  if (local_id == 0) {
-    float variance = local_sum_sq[0] / D;
-    rms_val = rsqrt(variance + epsilon);
-    local_sum_sq[0] =
-        rms_val; // Thread 0 calculates result and stores in shared memory
-  }
-
-  // Synchronization point: Ensure all threads wait for thread 0 to write
-  // rms_val to shared memory
-  barrier(CLK_LOCAL_MEM_FENCE);
-
-  // All threads (including thread 0) read the broadcast value from shared
-  // memory
-  rms_val = local_sum_sq[0];
-
-  // 6. Parallel normalization and apply weights
-  for (int i = local_id; i < D; i += RMSNORM_WG_SIZE) {
-    // a. Get weight value
-    float weight_val;
-    if (weight_is_q4) {
-      weight_val = dequantize_q4_0((const __global block_q4_0 *)weights, i);
-    } else {
-      weight_val = ((const __global float *)weights)[i];
-    }
-
-    // b. Decide whether to add 1 based on flag
-    if (add_unit_offset) {
-      weight_val += 1.0f;
-    }
-
-    // c. Calculate final result and write back to global memory
-    size_t index = row_id * D + i;
-    dst[index] = src[index] * rms_val * weight_val;
-  }
-}
-
-// ==================================================================
-// 2.  FP16 Input Kernel (rmsnorm_f16_q4)
-// ==================================================================
-__kernel void rmsnorm_f16_q4(
-    __global const half *src,     // Input tensor (fp16)
-    __global half *dst,           // Output tensor (fp16)
-    __global const void *weights, // Weight tensor (can be fp32 or q4_0)
-    const int weight_is_q4,       // Flag
-    const int D,                  // Dimension
-    const float epsilon,          // Epsilon (still float)
-    const int add_unit_offset     // Flag
-) {
-  const int row_id = get_group_id(0);
-  const int local_id = get_local_id(0);
-
-  __local float local_sum_sq[RMSNORM_WG_SIZE];
-
-  // Use float accumulator to ensure precision
-  float thread_sum_sq = 0.0f;
-  for (int i = local_id; i < D; i += RMSNORM_WG_SIZE) {
-    // Convert from half to float for calculation
-    float val = (float)src[row_id * D + i];
-    thread_sum_sq += val * val;
-  }
-  local_sum_sq[local_id] = thread_sum_sq;
-
-  // Workgroup reduction (identical to fp32 version)
-  barrier(CLK_LOCAL_MEM_FENCE);
-  for (int s = RMSNORM_WG_SIZE / 2; s > 0; s >>= 1) {
-    if (local_id < s) {
-      local_sum_sq[local_id] += local_sum_sq[local_id + s];
-    }
+    if (local_id < s) local_sum_sq[local_id] += local_sum_sq[local_id + s];
     barrier(CLK_LOCAL_MEM_FENCE);
   }
 
-  // Calculate RMS scaling factor (identical to fp32 version)
   float rms_val;
   if (local_id == 0) {
     float variance = local_sum_sq[0] / D;
@@ -151,7 +70,6 @@ __kernel void rmsnorm_f16_q4(
   barrier(CLK_LOCAL_MEM_FENCE);
   rms_val = local_sum_sq[0];
 
-  // Normalization and apply weights
   for (int i = local_id; i < D; i += RMSNORM_WG_SIZE) {
     float weight_val;
     if (weight_is_q4) {
@@ -159,13 +77,67 @@ __kernel void rmsnorm_f16_q4(
     } else {
       weight_val = ((const __global float *)weights)[i];
     }
-    if (add_unit_offset) {
-      weight_val += 1.0f;
-    }
+    if (add_unit_offset) weight_val += 1.0f;
 
     size_t index = row_id * D + i;
-    // Calculation result is float, finally convert back to half and store in
-    // dst
+    dst[index] = src[index] * rms_val * weight_val;
+  }
+}
+
+// ==================================================================
+// 2.  FP16 Input Kernel (rmsnorm_f16_q4)
+// ==================================================================
+__kernel void rmsnorm_f16_q4(
+    __global const void *src_void, // Input tensor (fp16)
+    __global void *dst_void,       // Output tensor (fp16)
+    __global const void *weights,  // Weight tensor (can be fp32 or q4_0)
+    const int weight_is_q4,        // Flag
+    const int D,                   // Dimension
+    const float epsilon,           // Epsilon (still float)
+    const int add_unit_offset,     // Flag
+    const ulong src_offset_bytes,  // Byte offset into src buffer
+    const ulong dst_offset_bytes   // Byte offset into dst buffer
+) {
+  __global const half *src = (__global const half *)((const __global char *)src_void + src_offset_bytes);
+  __global half *dst       = (__global half *)((__global char *)dst_void + dst_offset_bytes);
+
+  const int row_id   = get_group_id(0);
+  const int local_id = get_local_id(0);
+
+  __local float local_sum_sq[RMSNORM_WG_SIZE];
+
+  float thread_sum_sq = 0.0f;
+  for (int i = local_id; i < D; i += RMSNORM_WG_SIZE) {
+    float val = (float)src[row_id * D + i];
+    thread_sum_sq += val * val;
+  }
+  local_sum_sq[local_id] = thread_sum_sq;
+
+  barrier(CLK_LOCAL_MEM_FENCE);
+  for (int s = RMSNORM_WG_SIZE / 2; s > 0; s >>= 1) {
+    if (local_id < s) local_sum_sq[local_id] += local_sum_sq[local_id + s];
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+
+  float rms_val;
+  if (local_id == 0) {
+    float variance = local_sum_sq[0] / D;
+    rms_val = rsqrt(variance + epsilon);
+    local_sum_sq[0] = rms_val;
+  }
+  barrier(CLK_LOCAL_MEM_FENCE);
+  rms_val = local_sum_sq[0];
+
+  for (int i = local_id; i < D; i += RMSNORM_WG_SIZE) {
+    float weight_val;
+    if (weight_is_q4) {
+      weight_val = dequantize_q4_0((const __global block_q4_0 *)weights, i);
+    } else {
+      weight_val = ((const __global float *)weights)[i];
+    }
+    if (add_unit_offset) weight_val += 1.0f;
+
+    size_t index = row_id * D + i;
     float src_val = (float)src[index];
     dst[index] = (half)(src_val * rms_val * weight_val);
   }

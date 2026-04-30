@@ -37,6 +37,10 @@ void OpenCLRMSNormOp::forward(const std::vector<Tensor>& inputs, std::vector<Ten
   int add_unit_offset = options_.add_unit_offset ? 1 : 0;
   float epsilon = options_.epsilon;
 
+  const cl_ulong elem_bytes = bytesOfType(input.dtype()) / lanesOfType(input.dtype());
+  const cl_ulong src_offset_bytes = static_cast<cl_ulong>(input.impl()->storageOffset()) * elem_bytes;
+  const cl_ulong dst_offset_bytes = static_cast<cl_ulong>(output.impl()->storageOffset()) * elem_bytes;
+
   std::shared_ptr<KernelWrap> kernel_wrapper;
   if (input.dtype() == DataTypes::kFloat32) {
     kernel_wrapper = kernel_f32_q4_;
@@ -54,6 +58,8 @@ void OpenCLRMSNormOp::forward(const std::vector<Tensor>& inputs, std::vector<Ten
   ret |= kernel_wrapper->get().setArg(4, sizeof(int), &D);
   ret |= kernel_wrapper->get().setArg(5, sizeof(float), &epsilon);
   ret |= kernel_wrapper->get().setArg(6, sizeof(int), &add_unit_offset);
+  ret |= kernel_wrapper->get().setArg(7, sizeof(cl_ulong), &src_offset_bytes);
+  ret |= kernel_wrapper->get().setArg(8, sizeof(cl_ulong), &dst_offset_bytes);
 
   if (ret != CL_SUCCESS) { MLLM_ERROR("OpenCLRMSNormOp setArg failed: {}", ret); }
 

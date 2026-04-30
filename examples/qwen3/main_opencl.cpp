@@ -17,7 +17,7 @@ MLLM_MAIN({
   auto& model_version = Argparse::add<std::string>("-mv|--model_version").help("Model version").required(true);
   auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer_path").help("Tokenizer directory").required(true);
   auto& config_path = Argparse::add<std::string>("-c|--config_path").help("Config path").required(true);
-  auto& perf_path = Argparse::add<std::string>("--perf_path").help("Perfetto trace output path").def("qwen3_opencl.perf");
+  auto& perf_path = Argparse::add<std::string>("--perf_path").help("Perfetto trace output path").def("qwen3_opencl.perfetto");
 
   Argparse::parse(argc, argv);
 

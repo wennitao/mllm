@@ -18,6 +18,7 @@
 #include "mllm/backends/opencl/ops/ViewOp.hpp"
 #include "mllm/backends/opencl/ops/X2XOp.hpp"
 #include "mllm/backends/opencl/ops/SiLUOp.hpp"
+#include "mllm/backends/opencl/ops/FlashAttn2Op.hpp"
 
 #include "mllm/mllm.hpp"
 #include "mllm/core/DeviceTypes.hpp"
@@ -50,7 +51,7 @@ OpenCLBackend::OpenCLBackend() : Backend(kOpenCL, nullptr) {
                OpenCLEmbeddingOpFactory, OpenCLGraphBeginOpFactory, OpenCLGraphEndOpFactory, OpenCLSliceOpFactory,
                OpenCLViewOpFactory, OpenCLTransposeOpFactory, OpenCLFillOpFactory, OpenCLRMSNormOpFactory, OpenCLRoPEOpFactory,
                OpenCLCopyOpFactory, OpenCLLinearOpFactory, OpenCLMatMulOpFactory, OpenCLSoftmaxOpFactory,
-               OpenCLCausalMaskOpFactory, OpenCLSiLUOpFactory>();
+               OpenCLCausalMaskOpFactory, OpenCLSiLUOpFactory, OpenCLFlashAttention2OpFactory>();
 
   runtime_ = std::shared_ptr<OpenCLRuntime>(new OpenCLRuntime());
   if (!runtime_) {

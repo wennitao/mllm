@@ -53,10 +53,11 @@ MLLM_MAIN({
     return -1;
   }
 
-  // int N  = prefill_len.get();
-  // int CL = mllm::models::qwen3::Qwen3Config(config_path.get()).max_cache_length;
-  int N = 32;
-  int CL = 1024;
+  int N  = prefill_len.get();
+  int CL = mllm::models::qwen3::Qwen3Config(config_path.get()).max_cache_length;
+  // int N = 32;
+  // int CL = 1024;
+  MLLM_INFO("Prefill length (N) = {}, Context length (CL) = {}", N, CL);
 
   auto model_cfg = mllm::models::qwen3::Qwen3Config(config_path.get());
 
