@@ -1,0 +1,218 @@
+-- The CXX compiler identification is Clang 17.0.2
+-- The C compiler identification is Clang 17.0.2
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /mnt/data/chihao/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /mnt/data/chihao/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /mnt/data/chihao/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- CXX Compiler=Clang
+-- CXX Compiler version=17.0.2
+-- MLLM_GIT_COMMIT_HASH=ae0ea88599c91d2147dc945d3ae49225b852faa6
+-- CPM: Adding package stdexec@ (nvhpc-25.03.rc1)
+-- System           : Android-1
+-- System name      : Android
+-- System ver       : 1
+-- 
+-- Library ver      : 0.11.0
+-- Build date       : 2026-04-27
+-- Build year       : 2026
+-- 
+-- Creating symlink from /home/chihao/mllm/compile_commands.json to /home/chihao/mllm/build-android-arm64-v8a-qnn/compile_commands.json...
+-- Found Git: /usr/bin/git (found version "2.43.0") 
+-- CPM: stdexec: Adding package icm@1.5.0 (v1.5.0)
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - not found
+-- Check if compiler accepts -pthread
+-- Check if compiler accepts -pthread - yes
+-- Found Threads: TRUE  
+-- Looking for C++ include linux/io_uring.h
+-- Looking for C++ include linux/io_uring.h - found
+-- {fmt} version: 11.2.0
+-- Build type: Release
+-- Performing Test HAS_NULLPTR_WARNING
+-- Performing Test HAS_NULLPTR_WARNING - Success
+-- Proceeding with version: 25.12.19.0
+-- Looking for strtof_l
+-- Looking for strtof_l - found
+-- Looking for strtoull_l
+-- Looking for strtoull_l - found
+-- Looking for realpath
+-- Looking for realpath - found
+-- CMAKE_CXX_FLAGS: -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  
+-- CPM: Adding package highway@1.3.0 (1.3.0)
+CMake Deprecation Warning at build-android-arm64-v8a-qnn/_deps/highway-src/CMakeLists.txt:28 (cmake_policy):
+  The OLD behavior for policy CMP0111 will be removed from a future version
+  of CMake.
+
+  The cmake-policies(7) manual explains that the OLD behaviors of all
+  policies are deprecated and that a policy should be set to OLD only under
+  specific short-term circumstances.  Projects should be ported to the NEW
+  behavior and not rely on setting a policy to OLD.
+
+
+-- Performing Test ATOMICS_LOCK_FREE_INSTRUCTIONS
+-- Performing Test ATOMICS_LOCK_FREE_INSTRUCTIONS - Success
+-- Performing Test HWY_EMSCRIPTEN
+-- Performing Test HWY_EMSCRIPTEN - Failed
+-- Performing Test HWY_RISCV
+-- Performing Test HWY_RISCV - Failed
+-- Looking for sys/auxv.h
+-- Looking for sys/auxv.h - found
+-- Looking for asm/hwcap.h
+-- Looking for asm/hwcap.h - found
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/chihao/mllm/build-android-arm64-v8a-qnn/_deps/highway-build/googletest-download
+[1/9] Creating directories for 'googletest'
+[2/9] Performing download step (git clone) for 'googletest'
+Cloning into 'googletest-src'...
+HEAD is now at 43efa0a4 Merge pull request #3617 from Bagira80:fix_3616
+[3/9] Performing update step for 'googletest'
+[4/9] No patch step for 'googletest'
+[5/9] No configure step for 'googletest'
+[6/9] No build step for 'googletest'
+[7/9] No install step for 'googletest'
+[8/9] No test step for 'googletest'
+[9/9] Completed 'googletest'
+-- Found Python: /usr/bin/python3.12 (found version "3.12.3") found components: Interpreter 
+-- Found Python: /home/chihao/qnn_env/bin/python3.10 (found version "3.10.20") found components: Interpreter 
+-- Setting C++ macro TVM_FFI_USE_LIBBACKTRACE - 0
+-- Setting C++ macro TVM_FFI_BACKTRACE_ON_SEGFAULT - 1
+-- QNN SDK root: /mnt/data/chihao/qairt/2.44.0.260225
+-- MLLM_QNN INCLUDES: 
+CMake Error at third_party/googletest/googletest/cmake/internal_utils.cmake:165 (add_library):
+  add_library cannot create target "gtest" because another target with the
+  same name already exists.  The existing target is a static library created
+  in source directory
+  "/home/chihao/mllm/build-android-arm64-v8a-qnn/_deps/highway-build/googletest-src/googletest".
+  See documentation for policy CMP0002 for more details.
+Call Stack (most recent call first):
+  third_party/googletest/googletest/cmake/internal_utils.cmake:210 (cxx_library_with_type)
+  third_party/googletest/googletest/CMakeLists.txt:123 (cxx_library)
+
+
+CMake Error at third_party/googletest/googletest/cmake/internal_utils.cmake:165 (add_library):
+  add_library cannot create target "gtest_main" because another target with
+  the same name already exists.  The existing target is a static library
+  created in source directory
+  "/home/chihao/mllm/build-android-arm64-v8a-qnn/_deps/highway-build/googletest-src/googletest".
+  See documentation for policy CMP0002 for more details.
+Call Stack (most recent call first):
+  third_party/googletest/googletest/cmake/internal_utils.cmake:210 (cxx_library_with_type)
+  third_party/googletest/googletest/CMakeLists.txt:141 (cxx_library)
+
+
+CMake Error at third_party/googletest/googletest/cmake/internal_utils.cmake:165 (add_library):
+  add_library cannot create target "gmock" because another target with the
+  same name already exists.  The existing target is a static library created
+  in source directory
+  "/home/chihao/mllm/build-android-arm64-v8a-qnn/_deps/highway-build/googletest-src/googlemock".
+  See documentation for policy CMP0002 for more details.
+Call Stack (most recent call first):
+  third_party/googletest/googletest/cmake/internal_utils.cmake:210 (cxx_library_with_type)
+  third_party/googletest/googlemock/CMakeLists.txt:97 (cxx_library)
+
+
+CMake Error at third_party/googletest/googletest/cmake/internal_utils.cmake:165 (add_library):
+  add_library cannot create target "gmock_main" because another target with
+  the same name already exists.  The existing target is a static library
+  created in source directory
+  "/home/chihao/mllm/build-android-arm64-v8a-qnn/_deps/highway-build/googletest-src/googlemock".
+  See documentation for policy CMP0002 for more details.
+Call Stack (most recent call first):
+  third_party/googletest/googletest/cmake/internal_utils.cmake:210 (cxx_library_with_type)
+  third_party/googletest/googlemock/CMakeLists.txt:100 (cxx_library)
+
+
+-- Google Benchmark version: v1.9.4, normalized to 1.9.4
+-- Looking for shm_open in rt
+-- Looking for shm_open in rt - not found
+-- Performing Test HAVE_CXX_FLAG_WALL
+-- Performing Test HAVE_CXX_FLAG_WALL - Success
+-- Performing Test HAVE_CXX_FLAG_WEXTRA
+-- Performing Test HAVE_CXX_FLAG_WEXTRA - Success
+-- Performing Test HAVE_CXX_FLAG_WSHADOW
+-- Performing Test HAVE_CXX_FLAG_WSHADOW - Success
+-- Performing Test HAVE_CXX_FLAG_WFLOAT_EQUAL
+-- Performing Test HAVE_CXX_FLAG_WFLOAT_EQUAL - Success
+-- Performing Test HAVE_CXX_FLAG_WOLD_STYLE_CAST
+-- Performing Test HAVE_CXX_FLAG_WOLD_STYLE_CAST - Success
+-- Performing Test HAVE_CXX_FLAG_WCONVERSION
+-- Performing Test HAVE_CXX_FLAG_WCONVERSION - Success
+-- Performing Test HAVE_CXX_FLAG_WERROR
+-- Performing Test HAVE_CXX_FLAG_WERROR - Success
+-- Performing Test HAVE_CXX_FLAG_WSUGGEST_OVERRIDE
+-- Performing Test HAVE_CXX_FLAG_WSUGGEST_OVERRIDE - Success
+-- Performing Test HAVE_CXX_FLAG_PEDANTIC
+-- Performing Test HAVE_CXX_FLAG_PEDANTIC - Success
+-- Performing Test HAVE_CXX_FLAG_PEDANTIC_ERRORS
+-- Performing Test HAVE_CXX_FLAG_PEDANTIC_ERRORS - Success
+-- Performing Test HAVE_CXX_FLAG_WSHORTEN_64_TO_32
+-- Performing Test HAVE_CXX_FLAG_WSHORTEN_64_TO_32 - Success
+-- Performing Test HAVE_CXX_FLAG_FSTRICT_ALIASING
+-- Performing Test HAVE_CXX_FLAG_FSTRICT_ALIASING - Success
+-- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED_DECLARATIONS
+-- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED_DECLARATIONS - Success
+-- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED
+-- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED - Success
+-- Performing Test HAVE_CXX_FLAG_WSTRICT_ALIASING
+-- Performing Test HAVE_CXX_FLAG_WSTRICT_ALIASING - Success
+-- Performing Test HAVE_CXX_FLAG_WD654
+-- Performing Test HAVE_CXX_FLAG_WD654 - Failed
+-- Performing Test HAVE_CXX_FLAG_WTHREAD_SAFETY
+-- Performing Test HAVE_CXX_FLAG_WTHREAD_SAFETY - Success
+-- Enabling additional flags: -DINCLUDE_DIRECTORIES=/home/chihao/mllm/third_party/benchmark/include
+-- Cross-compiling to test HAVE_THREAD_SAFETY_ATTRIBUTES
+CMake Warning at third_party/benchmark/cmake/CXXFeatureCheck.cmake:49 (message):
+  If you see build failures due to cross compilation, try setting
+  HAVE_THREAD_SAFETY_ATTRIBUTES to 0
+Call Stack (most recent call first):
+  third_party/benchmark/CMakeLists.txt:238 (cxx_feature_check)
+
+
+-- Performing Test HAVE_THREAD_SAFETY_ATTRIBUTES -- success
+-- Performing Test HAVE_CXX_FLAG_COVERAGE
+-- Performing Test HAVE_CXX_FLAG_COVERAGE - Success
+-- Cross-compiling to test HAVE_STD_REGEX
+CMake Warning at third_party/benchmark/cmake/CXXFeatureCheck.cmake:49 (message):
+  If you see build failures due to cross compilation, try setting
+  HAVE_STD_REGEX to 0
+Call Stack (most recent call first):
+  third_party/benchmark/CMakeLists.txt:311 (cxx_feature_check)
+
+
+-- Performing Test HAVE_STD_REGEX -- success
+-- Cross-compiling to test HAVE_GNU_POSIX_REGEX
+-- Performing Test HAVE_GNU_POSIX_REGEX -- failed to compile
+-- Cross-compiling to test HAVE_POSIX_REGEX
+CMake Warning at third_party/benchmark/cmake/CXXFeatureCheck.cmake:49 (message):
+  If you see build failures due to cross compilation, try setting
+  HAVE_POSIX_REGEX to 0
+Call Stack (most recent call first):
+  third_party/benchmark/CMakeLists.txt:313 (cxx_feature_check)
+
+
+-- Performing Test HAVE_POSIX_REGEX -- success
+-- Cross-compiling to test HAVE_STEADY_CLOCK
+CMake Warning at third_party/benchmark/cmake/CXXFeatureCheck.cmake:49 (message):
+  If you see build failures due to cross compilation, try setting
+  HAVE_STEADY_CLOCK to 0
+Call Stack (most recent call first):
+  third_party/benchmark/CMakeLists.txt:322 (cxx_feature_check)
+
+
+-- Performing Test HAVE_STEADY_CLOCK -- success
+-- Cross-compiling to test HAVE_PTHREAD_AFFINITY
+-- Performing Test HAVE_PTHREAD_AFFINITY -- failed to compile
+-- Configuring incomplete, errors occurred!

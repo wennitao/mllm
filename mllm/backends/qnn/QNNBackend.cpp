@@ -115,7 +115,7 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
                QNNParamOpFactory, QNNSiLUOpFactory, QNNEmbeddingOpFactory>();
 
   QnnLog_Level_t qnnLogLevel = QNN_LOG_LEVEL_ERROR;  // default QNN log level
-  profilingLevel_ = ProfilingLevel::OFF;
+  profilingLevel_ = ProfilingLevel::DETAILED;
   debug_ = false;  // when set true, NATIVE tensor will be regared as APP_READ tensor
 
   // Load QNN libraries and hold handles for lifecycle management

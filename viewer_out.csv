@@ -1,0 +1,8 @@
+input log file location, /home/chihao/mllm/qnn_profile.csv
+qnn-profile-viewer version, v2.44.0.260225143659
+ version, 
+Backend version, 
+Msg Timestamp, Message, Time, Unit of Measurement, Timing Source, Event Level, Event Identifier
+0,INIT,0,US,NETRUN,ROOT,null
+0,COMPOSE GRAPHS,0,US,NETRUN,ROOT,null
+0,DE-INIT,0,US,NETRUN,ROOT,null
