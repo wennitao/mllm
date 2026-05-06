@@ -5,6 +5,7 @@
 #include "mllm/core/DeviceTypes.hpp"
 #include "mllm/core/ParameterFile.hpp"
 #include "mllm/engine/Context.hpp"
+#include "mllm/engine/ModuleProfiler.hpp"
 #include "mllm/engine/Task.hpp"
 
 namespace mllm::nn {
@@ -56,29 +57,25 @@ std::vector<Tensor> Layer::__main(const std::vector<Tensor>& inputs) {
 
   auto this_thread = Context::instance().thisThread();
   if (this_thread->trace_mode) {
-    // Submit!
-    // At this moment, heart pounding like thunder
-    // Tasks racing through kernels, swift as lightning
-    // Threads await, fate hanging by a thread
-    // Success or failure in this one moment
     task->custom_context_ptr = this_thread->ir_context.get();
     ctx.dispatcherManager()->submit(Dispatcher::trace_dispatcher_id, task);
-
-    // Everything is Ok. Bravo! You did it.
-    // Return what we need.
-    return task->outputs;
-  } else {
-    // Submit!
-    // At this moment, heart pounding like thunder
-    // Tasks racing through kernels, swift as lightning
-    // Threads await, fate hanging by a thread
-    // Success or failure in this one moment
-    ctx.dispatcherManager()->submit(static_cast<int32_t>(impl_->getInstancedOp()->getDevice()), task);
-
-    // Everything is Ok. Bravo! You did it.
-    // Return what we need.
     return task->outputs;
   }
+
+  const bool prof_active = mllm::engine::ModuleProfiler::isEnabled();
+  mllm::engine::ModuleProfiler::time_point t0;
+  if (prof_active) t0 = mllm::engine::ModuleProfiler::clock::now();
+
+  const int32_t dev = static_cast<int32_t>(impl_->getInstancedOp()->getDevice());
+  ctx.dispatcherManager()->submit(dev, task);
+
+  if (prof_active) {
+    // Drain device queue so closing timestamp reflects real GPU completion.
+    ctx.dispatcherManager()->syncWait(dev);
+    auto t1 = mllm::engine::ModuleProfiler::clock::now();
+    mllm::engine::ModuleProfiler::record(impl_->getAbsoluteName(), t0, t1);
+  }
+  return task->outputs;
 }
 
 OpTypes Layer::opType() const { return impl()->opType(); }

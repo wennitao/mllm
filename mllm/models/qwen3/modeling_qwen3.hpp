@@ -105,6 +105,8 @@ class Qwen3Attention final : public nn::Module {
   nn::RoPE k_rope_;
   nn::CausalMask mask_;
   nn::Softmax softmax_;
+  nn::MatMul qk_matmul_;   // Q @ K^T
+  nn::MatMul av_matmul_;   // attn @ V
 
   int hidden_size_;
   int head_dim_;
@@ -139,6 +141,10 @@ class Qwen3Attention final : public nn::Module {
 
     mask_ = reg<nn::CausalMask>("mask");
     softmax_ = reg<nn::Softmax>("softmax", -1);
+
+    // Wrap the two attention matmuls as nn::Layer so they get profiled.
+    qk_matmul_ = reg<nn::MatMul>("qk_matmul", /*transpose_a=*/false, /*transpose_b=*/true);
+    av_matmul_ = reg<nn::MatMul>("av_matmul", /*transpose_a=*/false, /*transpose_b=*/false);
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
@@ -182,11 +188,11 @@ class Qwen3Attention final : public nn::Module {
     if (key_states.dtype() == kFloat32) {
       // attention weight
       // [B, H, S, S]
-      attn = nn::functional::matmul(query_states, key_states, false, true) * (1.f / sqrtf(head_dim_));
+      attn = qk_matmul_(query_states, key_states) * (1.f / sqrtf(head_dim_));
       attn = mask_(attn);
       attn = softmax_(attn);
     } else if (key_states.dtype() == kFloat16) {
-      attn = nn::functional::matmul(query_states.to(kFloat32), key_states.to(kFloat32), false, true) * (1.f / sqrtf(head_dim_));
+      attn = qk_matmul_(query_states.to(kFloat32), key_states.to(kFloat32)) * (1.f / sqrtf(head_dim_));
       attn = mask_(attn);
       attn = softmax_(attn);
       attn = attn.to(kFloat16);
@@ -194,7 +200,7 @@ class Qwen3Attention final : public nn::Module {
 
     // attn output
     // [B, H, S, S] @ [B, H, S, D] -> [B, H, S, D]
-    auto output = nn::functional::matmul(attn, value_states);
+    auto output = av_matmul_(attn, value_states);
     // [B, H, S, D] -> [B, S, H, D] -> [B, S, H * D]
     output = output.transpose(1, 2).view({B, S, num_attention_heads_ * head_dim_});
     output = o_proj_(output);

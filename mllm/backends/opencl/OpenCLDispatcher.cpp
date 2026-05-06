@@ -2,7 +2,10 @@
 // Licensed under the MIT License.
 
 #include "mllm/backends/opencl/OpenCLDispatcher.hpp"
+#include "mllm/backends/opencl/OpenCLBackend.hpp"
+#include "mllm/backends/opencl/runtime/OpenCLRuntime.hpp"
 #include "mllm/engine/Dispatcher.hpp"
+#include "mllm/mllm.hpp"
 #include "mllm/utils/Common.hpp"
 #include "mllm/nn/Module.hpp"
 #include "mllm/tracy_perf/Tracy.hpp"
@@ -71,7 +74,13 @@ void OpenCLDispatcher::process(const Task::ptr_t& task) {
 }
 
 void OpenCLDispatcher::syncWait() {
-  // TODO
+  // Drain the GPU queue so wall-clock timers in callers (e.g. ModuleProfiler
+  // in Module::__main) reflect actual GPU completion, not enqueue return.
+  auto backend = std::static_pointer_cast<OpenCLBackend>(Context::instance().getBackend(kOpenCL));
+  if (!backend) return;
+  auto runtime = backend->runtime();
+  if (!runtime) return;
+  runtime->commandQueue().finish();
 }
 
 OpenCLDispatcher::ptr_t createOpenCLDispatcher(exec::static_thread_pool& thread_pool, const OpenCLDispatcherOptions& options) {

@@ -33,7 +33,10 @@ OpenCLRuntime::OpenCLRuntime() {
 
   devices_ = {devices[0]};
   context_ = std::make_shared<cl::Context>(devices_);
-  command_queue_ = std::make_shared<cl::CommandQueue>(*context_, devices_[0]);
+  // Enable per-kernel profiling so callers can use clGetEventProfilingInfo
+  // for accurate GPU timestamps. Drives ModuleProfiler when active; harmless
+  // when not used.
+  command_queue_ = std::make_shared<cl::CommandQueue>(*context_, devices_[0], CL_QUEUE_PROFILING_ENABLE);
 
   devices_[0].getInfo(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, &gpu_global_memery_cache_size_);
   devices_[0].getInfo(CL_DEVICE_MAX_COMPUTE_UNITS, &gpu_compute_units_);

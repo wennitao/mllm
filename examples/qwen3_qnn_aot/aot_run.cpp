@@ -1,3 +1,4 @@
+#include <chrono>
 #include <iostream>
 #include <fmt/core.h>
 #include <mllm/mllm.hpp>
@@ -55,7 +56,8 @@ MLLM_MAIN({
   }
 
   runner.generate(input_tensor["sequence"], config.context_len,
-                  [](const std::string& token) { std::cout << token << std::flush; });
+                  [](const std::string& token) { std::cout << token << std::flush; },
+                  /*perf=*/true);
   std::cout << "\n";
 
   #ifdef MLLM_PERFETTO_ENABLE

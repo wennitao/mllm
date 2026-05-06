@@ -2,6 +2,7 @@
 
 #include <fmt/core.h>
 #include <mllm/core/DeviceTypes.hpp>
+#include <mllm/engine/ModuleProfiler.hpp>
 #include <mllm/mllm.hpp>
 #include <mllm/models/qwen3/modeling_qwen3_opencl.hpp>
 #include <mllm/models/qwen3/tokenization_qwen3.hpp>
@@ -18,6 +19,10 @@ MLLM_MAIN({
   auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer_path").help("Tokenizer directory").required(true);
   auto& config_path = Argparse::add<std::string>("-c|--config_path").help("Config path").required(true);
   auto& perf_path = Argparse::add<std::string>("--perf_path").help("Perfetto trace output path").def("qwen3_opencl.perf");
+  auto& module_profile_path =
+      Argparse::add<std::string>("--module_profile_path")
+          .help("If set, write per-Module wall-clock CSV (forces queue.finish() per module — adds overhead).")
+          .def("");
 
   Argparse::parse(argc, argv);
 
@@ -51,6 +56,8 @@ MLLM_MAIN({
     qwen3.load(param);
     qwen3.to(mllm::kOpenCL);
 
+    if (!module_profile_path.get().empty()) { mllm::engine::ModuleProfiler::setEnabled(true); }
+
     fmt::print("\n{:*^60}\n", " Qwen3 OpenCL Interactive CLI ");
     fmt::print("Enter 'exit' or 'quit' to end the session\n\n");
 
@@ -75,6 +82,12 @@ MLLM_MAIN({
     }
 
     qwen3.perfSummary();
+
+    if (!module_profile_path.get().empty()) {
+      mllm::engine::ModuleProfiler::setEnabled(false);
+      mllm::engine::ModuleProfiler::dumpCSV(module_profile_path.get());
+      fmt::print("Wrote per-Module profile CSV to {}\n", module_profile_path.get());
+    }
   }
 
 #ifdef MLLM_PERFETTO_ENABLE

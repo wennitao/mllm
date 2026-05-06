@@ -7,6 +7,7 @@
 #include <fmt/core.h>
 
 #include "mllm/core/DeviceTypes.hpp"
+#include "mllm/engine/ModuleProfiler.hpp"
 #include "mllm/nn/Functional.hpp"
 #include "mllm/utils/Common.hpp"
 #include "mllm/utils/UnsafeMacros.hpp"
@@ -493,11 +494,17 @@ int ARGeneration::sampleFromDistribution(const std::vector<float>& probs) {
   return dist(gen);
 }
 
-void ARGeneration::prefillEventStartTimePoint() { llm_prefill_start_time_ = std::chrono::high_resolution_clock::now(); }
+void ARGeneration::prefillEventStartTimePoint() {
+  llm_prefill_start_time_ = std::chrono::high_resolution_clock::now();
+  mllm::engine::ModuleProfiler::setPhase("prefill");
+}
 
 void ARGeneration::prefillEventEndTimePoint() { llm_prefill_end_time_ = std::chrono::high_resolution_clock::now(); }
 
-void ARGeneration::decodeEventStartTimePoint() { llm_decode_start_time_ = std::chrono::high_resolution_clock::now(); }
+void ARGeneration::decodeEventStartTimePoint() {
+  llm_decode_start_time_ = std::chrono::high_resolution_clock::now();
+  mllm::engine::ModuleProfiler::setPhase("decode");
+}
 
 void ARGeneration::decodeEventEndTimePoint() { llm_decode_end_time_ = std::chrono::high_resolution_clock::now(); }
 
