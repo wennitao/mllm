@@ -16,7 +16,7 @@ PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("mllm.tensor_lifecycle")
         .SetDescription("Tracks the lifecycle of tensors, including their creation, allocation, usage, and destruction."),
     perfetto::Category("mllm.kernel")
-        .SetDescription("Tracks the execution of computational kernels on accelerators like GPUs."),
+        .SetDescription("Per-op GPU wall-clock (forces clFinish at slice END for OpenCL)."),
     perfetto::Category("mllm.ar_step").SetDescription("Auto regressive step"),
     perfetto::Category("mllm.qnn.execute").SetDescription("QNN execute"));
 

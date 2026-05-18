@@ -48,14 +48,17 @@ void OpenCLDispatcher::process(const Task::ptr_t& task) {
   switch (task->type) {
     case TaskTypes::kExecuteOp: {
 #ifdef MLLM_PERFETTO_ENABLE
+      // One slice per op covering reshape + setup + forward + clFinish, so the
+      // duration is the real GPU wall-clock for this op (not just the
+      // host-side clEnqueueNDRangeKernel return time). Costs a per-op sync —
+      // only paid in MLLM_PERFETTO_ENABLE builds.
       auto op_name = optype2Str(task->op->getOpType());
-      MLLM_PERF_TRACE_EVENT("mllm.kernel", perfetto::DynamicString{optype2Str(task->op->getOpType())},
-                            [&](perfetto::EventContext ctx) {
-                              int cnt = 0;
-                              for (auto& i : task->inputs) {
-                                ctx.AddDebugAnnotation(perfetto::DynamicString{"inputs-" + std::to_string(cnt++)}, i.shape());
-                              }
-                            });
+      MLLM_PERF_TRACE_BEGIN("mllm.kernel", perfetto::DynamicString{op_name}, [&](perfetto::EventContext ctx) {
+        int cnt = 0;
+        for (auto& i : task->inputs) {
+          ctx.AddDebugAnnotation(perfetto::DynamicString{"inputs-" + std::to_string(cnt++)}, i.shape());
+        }
+      });
 #endif
       auto op = task->op;
       auto& inputs = task->inputs;
@@ -63,6 +66,13 @@ void OpenCLDispatcher::process(const Task::ptr_t& task) {
       op->reshape(inputs, outputs);
       op->setup(inputs, outputs);
       op->forward(inputs, outputs);
+#ifdef MLLM_PERFETTO_ENABLE
+      {
+        auto backend = std::static_pointer_cast<OpenCLBackend>(Context::instance().getBackend(kOpenCL));
+        if (backend && backend->runtime()) { backend->runtime()->commandQueue().finish(); }
+      }
+      MLLM_PERF_TRACE_END("mllm.kernel");
+#endif
       break;
     }
     case TaskTypes::kExecuteModule: {
