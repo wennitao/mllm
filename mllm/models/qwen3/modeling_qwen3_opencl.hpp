@@ -31,6 +31,11 @@ class Qwen3AttentionOpenCL final : public nn::Module {
   nn::RoPE q_rope_;
   nn::RoPE k_rope_;
 
+  nn::CausalMask mask_;
+  nn::Softmax softmax_;
+  nn::MatMul qk_matmul_;   // Q @ K^T
+  nn::MatMul av_matmul_;   // attn @ V
+
   int hidden_size_;
   int head_dim_;
   int num_attention_heads_;
@@ -63,6 +68,12 @@ class Qwen3AttentionOpenCL final : public nn::Module {
 
     q_rope_ = reg<nn::RoPE>("q_rope", cfg.rope_theta, cfg.max_position_embeddings);
     k_rope_ = reg<nn::RoPE>("k_rope", cfg.rope_theta, cfg.max_position_embeddings);
+     mask_ = reg<nn::CausalMask>("mask");
+    softmax_ = reg<nn::Softmax>("softmax", -1);
+
+    // Wrap the two attention matmuls as nn::Layer so they get profiled.
+    qk_matmul_ = reg<nn::MatMul>("qk_matmul", /*transpose_a=*/false, /*transpose_b=*/true);
+    av_matmul_ = reg<nn::MatMul>("av_matmul", /*transpose_a=*/false, /*transpose_b=*/false);
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
@@ -109,7 +120,23 @@ class Qwen3AttentionOpenCL final : public nn::Module {
     value_states = value_states_new;
 
     // FlashAttention (BHSD inputs). Returns [B, H, S_q, D].
-    auto output = nn::functional::flashAttention2(query_states, key_states, value_states);
+    Tensor attn;
+    if (key_states.dtype() == kFloat32) {
+      // attention weight
+      // [B, H, S, S]
+      attn = qk_matmul_(query_states, key_states) * (1.f / sqrtf(head_dim_));
+      attn = mask_(attn);
+      attn = softmax_(attn);
+    } else if (key_states.dtype() == kFloat16) {
+      attn = qk_matmul_(query_states.to(kFloat32), key_states.to(kFloat32)) * (1.f / sqrtf(head_dim_));
+      attn = mask_(attn);
+      attn = softmax_(attn);
+      attn = attn.to(kFloat16);
+    }
+
+    // attn output
+    // [B, H, S, S] @ [B, H, S, D] -> [B, H, S, D]
+    auto output = av_matmul_(attn, value_states);
 
     // [B, H, S_q, D] -> [B, S_q, H, D] -> [B, S_q, H * D]
     output = output.transpose(1, 2).view({B, S, num_attention_heads_ * head_dim_});

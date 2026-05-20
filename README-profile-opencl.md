@@ -60,6 +60,139 @@ Open the resulting `.perf` file at <https://ui.perfetto.dev/>. Other track
 categories ([docs/quick_start/how_to_perf.rst](docs/quick_start/how_to_perf.rst)):
 `mllm.ar_step`, `mllm.tensor_lifecycle`, `mllm.func_lifecycle`.
 
+### Methodology change vs. older branches — do not compare `.perf` files across this boundary
+
+Before this branch (`opencl-flash-attention`), the dispatcher emitted a single
+Perfetto `TRACE_EVENT` per op and **did not** call `clFinish` afterwards. That
+made each slice an instant marker fired at host-side enqueue return, while the
+GPU continued running asynchronously. The slice width on those older traces is
+the host enqueue cost (microseconds, roughly constant), not the kernel's GPU
+time. The current branch wraps each op in `TRACE_BEGIN/END` with a `clFinish`
+between, so slice width is real GPU wall-clock plus per-op sync overhead.
+
+This means **two `.perf` files from different sides of this change are not
+directly comparable per-op** — the same SiLU/Linear/etc. will appear an order
+of magnitude or more "slower" on the new branch purely because the measurement
+now includes GPU completion. The `perfSummary` tokens/s number is unaffected
+(it is wall-clocked by `ARGeneration` independently of which dispatcher macro
+is in use).
+
+```
+Same op, same GPU work (≈ 300 µs kernel):
+
+Old branch (TRACE_EVENT, no clFinish)
+  CPU ──┤E├──────────────────────────────
+         │
+         ▼ marker
+  GPU      ░░░[══════ kernel ══════]░░░░░
+  Slice  ▒ 15 µs   ← only the enqueue return
+
+Current branch (TRACE_BEGIN/END + clFinish)
+  CPU ──┤E├────── wait on clFinish ──────
+         │                            │
+         ▼ BEGIN                      ▼ END
+  GPU      ░[══════ kernel ══════]░░░░░░
+  Slice  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 320 µs
+                                  ↑
+                                  per-op clFinish destroys
+                                  pipeline overlap → end-to-end
+                                  runtime is inflated under
+                                  this trace
+```
+
+What each trace can and cannot answer:
+
+| Question                                | Old branch        | Current branch    |
+|-----------------------------------------|-------------------|-------------------|
+| Per-op GPU wall-clock                   | no                | yes               |
+| Rank kernels by GPU cost                | no                | yes               |
+| Realistic end-to-end runtime in trace   | yes               | no (inflated)     |
+| Isolated host-side enqueue overhead     | yes               | mixed-in          |
+| FA-vs-eager per-op A/B                  | only against another `TRACE_EVENT` run | only against another `BEGIN/END + clFinish` run |
+
+To do a fair per-op A/B between two attention implementations, both runs must
+use the same dispatcher path — cherry-pick the current dispatcher onto the
+older branch and rebuild, do not compare a current-branch `.perf` against an
+old-branch `.perf`.
+
+The fully correct fix is to read OpenCL event timestamps via
+`clGetEventProfilingInfo`, which gives true per-op GPU start/end times without
+forcing pipeline serialization. The queue is already created with
+`CL_QUEUE_PROFILING_ENABLE` ([OpenCLRuntime.cpp:39](mllm/backends/opencl/runtime/OpenCLRuntime.cpp#L39)),
+so the events are available; mllm just does not consume them yet.
+
+#### The exact code change
+
+The dispatcher diff between `profile_cpu_gpu_npu` and `opencl-flash-attention`
+is the only thing that produces the per-op timing differences. Two things
+change at once.
+
+**`profile_cpu_gpu_npu` (old)** — instant marker, GPU runs async:
+
+```cpp
+case TaskTypes::kExecuteOp: {
+#ifdef MLLM_PERFETTO_ENABLE
+  MLLM_PERF_TRACE_EVENT("mllm.kernel", op_name, /* annotations */);  // instant marker
+#endif
+  op->reshape(inputs, outputs);
+  op->setup(inputs, outputs);
+  op->forward(inputs, outputs);   // clEnqueueNDRangeKernel — returns async
+  break;                          // loop moves on while GPU still running
+}
+```
+
+**`opencl-flash-attention` (current)** — explicit slice with `clFinish` inside:
+
+```cpp
+case TaskTypes::kExecuteOp: {
+#ifdef MLLM_PERFETTO_ENABLE
+  MLLM_PERF_TRACE_BEGIN("mllm.kernel", op_name, /* annotations */);  // slice OPENS
+#endif
+  op->reshape(inputs, outputs);
+  op->setup(inputs, outputs);
+  op->forward(inputs, outputs);   // clEnqueueNDRangeKernel — still returns async...
+#ifdef MLLM_PERFETTO_ENABLE
+  backend->runtime()->commandQueue().finish();  // ...but BLOCK here until GPU drains
+  MLLM_PERF_TRACE_END("mllm.kernel");            // slice CLOSES after GPU completion
+#endif
+  break;
+}
+```
+
+The two changes:
+
+1. **Macro shape.** `MLLM_PERF_TRACE_EVENT(...)` is a Perfetto `TRACE_EVENT` —
+   a single RAII-scoped slice. Standing alone as a statement, it opens and
+   closes back-to-back: effectively an instant event with no duration.
+   `MLLM_PERF_TRACE_BEGIN/_END` are explicit boundaries: the slice's lifetime
+   is exactly the code between them.
+
+2. **`clFinish` added inside the slice.** This is the part that actually
+   changes what is being timed.
+   - `op->forward` calls `clEnqueueNDRangeKernel`, which only queues the
+     kernel and returns immediately. The GPU starts working in parallel.
+   - Without `clFinish`, the dispatcher returns from `process()` and the next
+     `kExecuteOp` can reshape/enqueue while the previous kernel is still
+     running on the GPU. Pipeline overlap is preserved, but no Perfetto slice
+     captures GPU completion.
+   - With `clFinish`, the host thread is blocked inside the slice until the
+     command queue drains. The slice's closing timestamp is therefore
+     "GPU finished kernel N", not "kernel N enqueued".
+
+Switching the macro from `TRACE_EVENT` to `BEGIN/END` alone would still emit
+a slice, but it would cover only host enqueue time (microseconds, roughly
+constant). It is the **added `clFinish`** that makes the slice include real
+GPU wall-clock.
+
+Because this change is at the dispatcher level, it applies uniformly to every
+op — SiLU, Linear, RMSNorm, RoPE, the kv-cache copies, everything. There is
+no per-op code change. On the old branch, every op's slice was host enqueue
+time (~µs). On the new branch, every op's slice is host enqueue + GPU
+wall-clock + `clFinish` overhead (hundreds of µs to ms). That is the entire
+mechanism behind the 30x SiLU, the inflated first three Linears, and every
+other "regression" visible in a cross-branch trace comparison — same
+kernels, same shapes, same inputs, different stopwatch.
+
 ## 3. `ModuleProfiler` CSV — per-Module wall-clock
 
 Defined in [ModuleProfiler.cpp](mllm/engine/ModuleProfiler.cpp). Driven from
