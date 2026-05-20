@@ -1107,6 +1107,367 @@ Confidential and Proprietary - Qualcomm Technologies, Inc.
         </OpDef>
 
         <OpDef>
+            <Name>FlashAttentionV2</Name>
+            <Description>
+                <Content>
+                    fp16 FlashAttention with rx32 dot + rx2 V mad + vectorised
+                    online softmax stats (M, S). Same op signature as
+                    FlashAttention so it slots into existing graphs by node
+                    type only. fp16 inputs/outputs only.
+                </Content>
+            </Description>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Description>
+                    <Content>Q : [B, S_q, H_q, D]  (fp16)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, S_q, H_q, D]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>in[1]</Name>
+                <Description>
+                    <Content>K : [B, S_kv, H_kv, D]  (fp16)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, S_kv, H_kv, D]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>in[2]</Name>
+                <Description>
+                    <Content>V : [B, S_kv, H_kv, D]  (fp16)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, S_kv, H_kv, D]</Text>
+                </Shape>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Description>
+                    <Content>O : [B, S_q, H_q, D]  (fp16)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Text>[B, S_q, H_q, D]</Text>
+                </Shape>
+            </Output>
+
+            <Parameter>
+                <Name>softmax_scale</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>causal</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <SupportedBackend>HTP</SupportedBackend>
+        </OpDef>
+
+        <OpDef>
+            <Name>FlashAttentionInt8KV</Name>
+            <Description>
+                <Content>
+                    Scaled dot-product attention via FlashAttention online softmax.
+                    Q is fp16; K and V are u8 with per-tensor symmetric quant
+                    (zp=128, scale supplied as scalar params).  Layout matches
+                    FlashAttention: NHWC = [B, S, H, D].  Supports GQA when H_q
+                    is a multiple of H_kv.  Output has the same shape as Q.
+                </Content>
+            </Description>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Description>
+                    <Content>Q : [B, S_q, H_q, D]  (fp16)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, S_q, H_q, D]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>in[1]</Name>
+                <Description>
+                    <Content>K : [B, S_kv, H_kv, D]  (u8 zp=128 sym)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, S_kv, H_kv, D]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>in[2]</Name>
+                <Description>
+                    <Content>V : [B, S_kv, H_kv, D]  (u8 zp=128 sym)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, S_kv, H_kv, D]</Text>
+                </Shape>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Description>
+                    <Content>O : [B, S_q, H_q, D]  (fp16)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Text>[B, S_q, H_q, D]</Text>
+                </Shape>
+            </Output>
+
+            <Parameter>
+                <Name>softmax_scale</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>k_scale</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>v_scale</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>causal</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <SupportedBackend>HTP</SupportedBackend>
+        </OpDef>
+
+        <OpDef>
+            <Name>SoftmaxBlockSparseCausal</Name>
+            <Description>
+                <Content>
+                    Fused (scale + block-sparse causal mask + softmax) for the
+                    decomposed block-sparse attention graph. Replaces the
+                    Mul(QK, scale) + Add(QKs, mask) + Softmax sequence with one
+                    op. The mask is structurally implied by q_block_idx and bk
+                    (no mask tensor is materialised).
+                </Content>
+            </Description>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Description>
+                    <Content>QK : [B, H_q, BQ, top_k*bk]</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, H_q, BQ, top_k*bk]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>q_block_idx</Name>
+                <Description>
+                    <Content>q_block_idx : uint32 scalar (runtime-bindable)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Description>
+                    <Content>P : softmax over the last axis of in[0]</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Text>[B, H_q, BQ, top_k*bk]</Text>
+                </Shape>
+            </Output>
+
+            <Parameter>
+                <Name>softmax_scale</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>bk</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <SupportedBackend>HTP</SupportedBackend>
+        </OpDef>
+
+        <OpDef>
+            <Name>SoftmaxBlockSparseCausalBigBatch</Name>
+            <Description>
+                <Content>
+                    Big-batch variant of SoftmaxBlockSparseCausal for the
+                    big-batch rank-3 sparse pipeline. Inputs: QK and a
+                    slice_base uint32 scalar (set to 0 by the user; replaced
+                    per-slice by AUTOSPLIT with the slice's global row offset).
+                    Per-row qb index is computed as
+                    (slice_base + h_local) % num_qb.
+                </Content>
+            </Description>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Description>
+                    <Content>QK : [B, big_batch, BQ, top_k*bk]</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NHWC</Layout>
+                    <Text>[B, big_batch, BQ, top_k*bk]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>slice_base</Name>
+                <Description>
+                    <Content>slice_base : uint32 scalar (graph-time 0;
+                                replaced per-slice by AUTOSPLIT)</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Description>
+                    <Content>P : softmax over the last axis of in[0]</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Text>[B, big_batch, BQ, top_k*bk]</Text>
+                </Shape>
+            </Output>
+
+            <Parameter>
+                <Name>softmax_scale</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>bk</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <Parameter>
+                <Name>num_qb</Name>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>N-1</Default>
+            </Parameter>
+
+            <SupportedBackend>HTP</SupportedBackend>
+        </OpDef>
+
+        <OpDef>
             <Name>WNop</Name>
             <Description>
                 <Content>
@@ -1195,6 +1556,9 @@ Confidential and Proprietary - Qualcomm Technologies, Inc.
             <OpName>LLaMAReLU</OpName>
             <OpName>CausalMask</OpName>
             <OpName>FlashAttention</OpName>
+            <OpName>FlashAttentionInt8KV</OpName>
+            <OpName>FlashAttentionV2</OpName>
+            <OpName>SoftmaxBlockSparseCausal</OpName>
         </SupportedOps>
 
         <!--SiLU-->
@@ -1595,6 +1959,96 @@ Confidential and Proprietary - Qualcomm Technologies, Inc.
                 <Name>out[0]</Name>
                 <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
                 <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+            </Output>
+        </SupplementalOpDef>
+
+        <!--FlashAttentionV2-->
+        <SupplementalOpDef>
+            <Name>FlashAttentionV2</Name>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+            </Input>
+            <Input>
+                <Name>in[1]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+            </Input>
+            <Input>
+                <Name>in[2]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+            </Output>
+        </SupplementalOpDef>
+
+        <!--SoftmaxBlockSparseCausal-->
+        <SupplementalOpDef>
+            <Name>SoftmaxBlockSparseCausal</Name>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+            </Input>
+
+            <Input>
+                <Name>q_block_idx</Name>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+            </Output>
+        </SupplementalOpDef>
+
+        <!--SoftmaxBlockSparseCausalBigBatch-->
+        <SupplementalOpDef>
+            <Name>SoftmaxBlockSparseCausalBigBatch</Name>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+            </Input>
+
+            <Input>
+                <Name>slice_base</Name>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+            </Output>
+        </SupplementalOpDef>
+
+        <!--FlashAttentionInt8KV-->
+        <SupplementalOpDef>
+            <Name>FlashAttentionInt8KV</Name>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
+            </Input>
+            <Input>
+                <Name>in[1]</Name>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_8</Datatype>
+            </Input>
+            <Input>
+                <Name>in[2]</Name>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_8</Datatype>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_16</Datatype>
             </Output>
         </SupplementalOpDef>
 

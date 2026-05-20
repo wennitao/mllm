@@ -37,16 +37,21 @@ DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMADequantize)
 DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMASuperSiLU)
 DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMAQuantize)
 DECLARE_PKG_OPS_OPTS_LIST(PKG_FlashAttention)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_FlashAttentionInt8KV)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_FlashAttentionV2)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_SoftmaxBlockSparseCausal)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_SoftmaxBlockSparseCausalBigBatch)
 
 END_PKG_OPS_OPTS_LIST()
 
 // op package info
 static constexpr auto sg_packageName = THIS_PKG_NAME_STR;  // package name passed in as compile flag
 
-static std::array<const char*, 18> sg_opNames{{"RMSNorm", "KVCache", "LLaMADequantizeAdd", "LLaMAMul", "LLaMAReLU",
+static std::array<const char*, 22> sg_opNames{{"RMSNorm", "KVCache", "LLaMADequantizeAdd", "LLaMAMul", "LLaMAReLU",
                                                "CausalMask", "SiLU", "QLayerNorm", "RoPE", "RoPESimple", "WNop", "LLaMAAdd",
                                                "IRoPE", "LLaMALinear", "LLaMADequantize", "LLaMASuperSiLU", "LLaMAQuantize",
-                                               "FlashAttention"}};
+                                               "FlashAttention", "FlashAttentionInt8KV", "FlashAttentionV2",
+                                               "SoftmaxBlockSparseCausal", "SoftmaxBlockSparseCausalBigBatch"}};
 
 static Qnn_ApiVersion_t sg_sdkApiVersion = QNN_HTP_API_VERSION_INIT;
 static QnnOpPackage_Info_t sg_packageInfo = QNN_OP_PACKAGE_INFO_INIT;
@@ -172,6 +177,15 @@ Qnn_ErrorHandle_t LLaMAPackageInit(QnnOpPackage_GlobalInfrastructure_t infrastru
    */
   REGISTER_PACKAGE_PER_CHANNEL_QUANTIZED_OPS()
 
+  /*
+   * Register the DEF_PACKAGE_OPTIMIZATION rules from the per-op .cpp files
+   * (e.g. SoftmaxBlockSparseCausal.cpp's AUTOTHREAD_HVX rule). Without this
+   * call, DEF_PACKAGE_OPTIMIZATION rules compile cleanly but never reach
+   * the HTP optimizer — so any AUTOSPLIT / AUTOTHREAD_HVX directive becomes
+   * a no-op and the kernel stays single-threaded.
+   */
+  REGISTER_PACKAGE_OPTIMIZATIONS()
+
   sg_globalInfra = infrastructure;
   sg_packageInitialized = true;
   return QNN_SUCCESS;
@@ -291,6 +305,23 @@ Qnn_ErrorHandle_t LLaMAPackageValidateOpConfig(Qnn_OpConfig_t opConfig) {
     }
   } else if (std::string(opConfig.v1.typeName) == "FlashAttention") {
     if (opConfig.v1.numOfParams != 2 || opConfig.v1.numOfInputs != 3 || opConfig.v1.numOfOutputs != 1) {
+      return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
+    }
+  } else if (std::string(opConfig.v1.typeName) == "FlashAttentionInt8KV") {
+    if (opConfig.v1.numOfParams != 4 || opConfig.v1.numOfInputs != 3 || opConfig.v1.numOfOutputs != 1) {
+      return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
+    }
+  } else if (std::string(opConfig.v1.typeName) == "FlashAttentionV2") {
+    if (opConfig.v1.numOfParams != 2 || opConfig.v1.numOfInputs != 3 || opConfig.v1.numOfOutputs != 1) {
+      return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
+    }
+  } else if (std::string(opConfig.v1.typeName) == "SoftmaxBlockSparseCausal") {
+    if (opConfig.v1.numOfParams != 2 || opConfig.v1.numOfInputs != 2 || opConfig.v1.numOfOutputs != 1) {
+      return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
+    }
+  } else if (std::string(opConfig.v1.typeName) == "SoftmaxBlockSparseCausalBigBatch") {
+    // Inputs: QK + slice_base (uint32 scalar). Params: softmax_scale, bk, num_qb.
+    if (opConfig.v1.numOfParams != 3 || opConfig.v1.numOfInputs != 2 || opConfig.v1.numOfOutputs != 1) {
       return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
     }
   } else {
