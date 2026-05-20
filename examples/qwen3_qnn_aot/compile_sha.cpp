@@ -43,7 +43,6 @@ MLLM_MAIN({
   Argparse::parse(argc, argv);
 
   int N = 32;
-  int CL = 1024;
 
   if (help.isSet()) {
     Argparse::printHelp();
@@ -57,6 +56,7 @@ MLLM_MAIN({
   }
 
   auto model_cfg = mllm::models::qwen3::Qwen3Config(model_cfg_path.get());
+  const int CL = model_cfg.max_cache_length;
 
   // Load original parameters
   auto params = mllm::load(model_path.get(), mllm::ModelFileVersion::kV2);

@@ -71,17 +71,6 @@ Tensor QDQ(nn::Module* m, Tensor in, const std::string& qdq_name_in_pytorch) {
       in.attach("zero_point", zp.impl(), true);
       break;
     }
-    // Boundary-fp16 → uint16 entry. Used by the split-prefill modeling when a
-    // chunk-boundary fp16 tensor first encounters a per-op QDQ inside the
-    // chunk. CastType visitor lowers .to(kUInt16PerTensorAsy) to a Quantize op.
-    case kFloat16: {
-      auto scale = m->getTopParameterFile()->pull(scale_name);
-      auto zp = m->getTopParameterFile()->pull(zp_name);
-      in = in.to(kUInt16PerTensorAsy);
-      in.attach("scale", scale.impl(), true);
-      in.attach("zero_point", zp.impl(), true);
-      break;
-    }
     default: {
       MLLM_ERROR_EXIT(ExitCode::kCoreError, "Can't Process dtype={}", nameOfType(in.dtype()));
     }

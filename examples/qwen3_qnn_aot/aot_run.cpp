@@ -33,7 +33,7 @@ MLLM_MAIN({
   config.num_heads = qwen3_cfg.num_key_value_heads;
   config.head_dim = qwen3_cfg.head_dim;
   config.vocab_size = qwen3_cfg.vocab_size;
-  config.context_len = 1024;
+  config.context_len = qwen3_cfg.max_cache_length;
   config.ar_len = ar_len.get();
 
   auto tokenizer = mllm::models::qwen3::Qwen3Tokenizer(tokenizer_path.get());
@@ -55,7 +55,7 @@ MLLM_MAIN({
   }
 
   runner.generate(input_tensor["sequence"], config.context_len,
-                  [](const std::string& token) { std::cout << token << std::flush; });
+                  [](const std::string& token) { std::cout << token << std::flush; }, /*perf=*/true);
   std::cout << "\n";
 
   #ifdef MLLM_PERFETTO_ENABLE

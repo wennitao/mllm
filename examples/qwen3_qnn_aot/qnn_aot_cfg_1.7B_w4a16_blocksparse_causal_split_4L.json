@@ -1,0 +1,40 @@
+{
+    "_comment": "Split-prefill variant of qnn_aot_cfg_1.7B_w4a16_blocksparse_causal.json. The 57-graph context inflates QNN's PD memory estimate to ~4 GB at load time, which exceeds HtpSignedPd's cap (~1.5-2 GB on V79/SM8650). HtpUnsignedPd allows the larger context. Otherwise identical to the monolithic config.",
+    "target_machine": {
+        "htp_arch": "V79",
+        "htp_chipset": "SM8650",
+        "htp_try_best_performance": "HtpBurst",
+        "htp_security_pd_session": "HtpUnsignedPd",
+        "htp_vtcm_capability_in_mb": 8
+    },
+    "graph_on_qnn": [
+        "model"
+    ],
+    "op_on_qnn": [
+        "lm_head"
+    ],
+    "split_graph": 1,
+    "quant_recipe": {
+        "llm_recipe": true,
+        "layers": 4,
+        "builtin_llm_pass": {
+            "model": "qwen3",
+            "lm_head": {
+                "fallback": {
+                    "method": "LPBQ",
+                    "sym": true,
+                    "precision": "w4a16",
+                    "block_size": 16
+                }
+            },
+            "linear": {
+                "fallback": {
+                    "method": "LPBQ",
+                    "sym": true,
+                    "precision": "w4a16",
+                    "block_size": 16
+                }
+            }
+        }
+    }
+}
