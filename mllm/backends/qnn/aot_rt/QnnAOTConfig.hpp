@@ -9,7 +9,8 @@ namespace mllm::qnn::aot {
 
 struct QnnAOTConfig {
   int num_layers = 28;
-  int num_heads = 12;
+  int num_heads = 12;             // num_key_value_heads (the standard PromptProcessor used this for both Q and KV; kept for backwards compat)
+  int num_attention_heads = 12;   // Hq for GQA — distinct from num_heads (Hkv) when Hq > Hkv. Defaults to num_heads (MHA).
   int head_dim = 128;
   int vocab_size = 151936;
 

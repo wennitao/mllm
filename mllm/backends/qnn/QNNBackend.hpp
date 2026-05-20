@@ -128,7 +128,7 @@ class QNNBackend final : public Backend {
   [[nodiscard]] Qnn_ContextHandle_t context() const { return context_; }
 
  private:
-  bool debug_;
+  bool debug_;  // controlled by -DMLLM_QNN_DEBUG compile flag
   ProfilingLevel profilingLevel_;
   Qnn_ContextHandle_t context_ = nullptr;
   std::unique_ptr<QNNRuntime> runtime_;

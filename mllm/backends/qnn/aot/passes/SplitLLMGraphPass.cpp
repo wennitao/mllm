@@ -56,6 +56,38 @@ void recursiveRemoveOpsIntoNewGraph(const ir::IRContext::ptr_t& ctx, ir::graph::
 }  // namespace
 
 uint8_t SplitLLMGraphPass::run(const ir::node_ptr_t& op) {
+  // Split-prefill path: the user has already produced one independent subgraph
+  // per chunk. There's nothing to SPLIT — but the downstream lowering pass +
+  // op visitors require:
+  //   - the chunk's SubGraphOp to carry the "use_qnn" attribute
+  //     (LLM2QnnLoweringPass:174 reads belongsTo()->getAttr("use_qnn"))
+  //   - every linalg op inside the chunk to carry "qnn_graph_name" +
+  //     "qnn_context_name" StrAttrs (every visitor's rewrite reads these to
+  //     route Qnn AOT capture calls — see Embedding.cpp:28 etc.)
+  // The standard split branch sets all of these at lines ~117 + ~177-178 on
+  // the freshly-created sub-graphs; we just set them on our pre-split chunk.
+  {
+    auto& cfg = AOTCompileContext::getInstance().getConfig();
+    auto chunk_name = cfg.value("chunk_graph_name", std::string{});
+    if (!chunk_name.empty()) {
+      MLLM_RT_ASSERT(op->isa_<ir::ModuleOp>());
+      auto chunk_subgraph_sym = getCtx()->lookupSymbolTable(chunk_name);
+      if (chunk_subgraph_sym != nullptr) {
+        auto chunk_subgraph = chunk_subgraph_sym->cast_<ir::graph::SubGraphOp>();
+        if (chunk_subgraph != nullptr) {
+          if (!chunk_subgraph->getAttr("use_qnn")) {
+            chunk_subgraph->setAttr("use_qnn", getCtx()->create<ir::BoolAttr>(true));
+          }
+          // Tag every linalg op in the chunk with qnn_graph_name + qnn_context_name.
+          // Visitors at rewrite time read these to dispatch QNN capture calls.
+          recursiveAttachGraphNameAndContextName(getCtx(), /*qnn_context_name=*/"context.0",
+                                                 /*qnn_graph_name=*/chunk_name, chunk_subgraph);
+        }
+      }
+      return ir::PASS_RET_SUCCESS;
+    }
+  }
+
   // The top op should be modelOp
   MLLM_RT_ASSERT(op->isa_<ir::ModuleOp>());
 

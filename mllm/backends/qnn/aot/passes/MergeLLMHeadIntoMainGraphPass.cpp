@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "mllm/backends/qnn/aot/passes/MergeLLMHeadIntoMainGraphPass.hpp"
+#include "mllm/backends/qnn/aot/passes/AOTCompileContext.hpp"
 #include "mllm/compile/ir/builtin/Op.hpp"
 #include "mllm/compile/ir/graph/Op.hpp"
 #include "mllm/compile/ir/linalg/Op.hpp"
@@ -14,6 +15,13 @@
 namespace mllm::qnn::aot {
 
 uint8_t MergeLLMHeadIntoMainGraphPass::run(const ir::node_ptr_t& op) {
+  // Split-prefill path: lm_head already lives inside the FinalChunkModule's
+  // subgraph, so nothing to merge.
+  {
+    auto& cfg = AOTCompileContext::getInstance().getConfig();
+    if (cfg.value("chunk_graph_name", std::string{}).size() > 0) { return ir::PASS_RET_SUCCESS; }
+  }
+
   // The top op should be ModuleOp
   MLLM_RT_ASSERT(op->isa_<ir::ModuleOp>());
 

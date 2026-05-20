@@ -49,6 +49,14 @@ uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
   auto model_op = op->cast_<ir::ModuleOp>();
   auto writer = ir::IRWriter(getCtx(), model_op->getTopRegion());
 
+  // Split-prefill path: the chunk_graph_name config option names the single
+  // pre-split subgraph this chunk's IR contains. Skip the "model" / regex
+  // validation and capture that subgraph directly. (The standard monolithic
+  // path stays unchanged: chunk_graph_name unset → existing behavior.)
+  const std::string chunk_name =
+      AOTCompileContext::getInstance().getConfig().value("chunk_graph_name", std::string{});
+  const bool split_path = !chunk_name.empty();
+
   // Check only has 1 call graph op in model_op
   ir::graph::CallGraphOp::ptr_t call_graph_op = nullptr;
   writer.walk<ir::graph::CallGraphOp>(
@@ -63,17 +71,18 @@ uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
     return ir::PASS_RET_FAILURE;
   }
 
-  // Check call graph op point to a subgraph named "model"
+  // Check call graph op point to the expected subgraph name (default "model").
+  const std::string expected_name = split_path ? chunk_name : "model";
   auto symbol_attr = call_graph_op->getSymbolAttr();
-  if (symbol_attr == nullptr || symbol_attr->str() != "model") {
-    MLLM_ERROR("LLM2QnnLoweringPass: CallGraphOp should point to a subgraph named 'model'");
+  if (symbol_attr == nullptr || symbol_attr->str() != expected_name) {
+    MLLM_ERROR("LLM2QnnLoweringPass: CallGraphOp should point to a subgraph named '{}'", expected_name);
     return ir::PASS_RET_FAILURE;
   }
 
-  // Get the "model" subgraph
-  auto model_subgraph = getCtx()->lookupSymbolTable("model")->cast_<ir::graph::SubGraphOp>();
+  // Get the expected subgraph.
+  auto model_subgraph = getCtx()->lookupSymbolTable(expected_name)->cast_<ir::graph::SubGraphOp>();
   if (model_subgraph == nullptr) {
-    MLLM_ERROR("LLM2QnnLoweringPass: Cannot find 'model' subgraph in symbol table");
+    MLLM_ERROR("LLM2QnnLoweringPass: Cannot find '{}' subgraph in symbol table", expected_name);
     return ir::PASS_RET_FAILURE;
   }
 
@@ -87,35 +96,37 @@ uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
     }
   }
 
-  // Validate that we only have the expected subgraphs: model, model.0.s32, model.1.s16, etc.
-  // Pattern: model.x.sN where x is a number and N can be 16, 32, 64, 96, etc.
-  std::regex model_pattern(R"(^model(\.\d+\.s\d+)?$)");
-  for (const auto& [name, _] : subgraphs) {
-    if (!std::regex_match(name, model_pattern)) {
-      MLLM_ERROR("LLM2QnnLoweringPass: Unexpected subgraph name {}, expected pattern: model or model.x.sx", name);
+  subgraph_map_.clear();
+  if (split_path) {
+    // Capture only the named chunk subgraph; no regex validation.
+    if (subgraphs.count(chunk_name) == 0) {
+      MLLM_ERROR("LLM2QnnLoweringPass: chunk subgraph '{}' not found in module", chunk_name);
       return ir::PASS_RET_FAILURE;
     }
-  }
-
-  // Store subgraphs in the member variable
-  subgraph_map_.clear();
-  for (const auto& [name, subgraph] : subgraphs) {
-    if (name != "model") { subgraph_map_[name] = subgraph; }
-  }
-
-  // Validate that at least one model.x.sN subgraph exists (required for the lowering)
-  // We don't require specifically model.0.s32, but any model.x.sN pattern
-  bool has_valid_subgraph = false;
-  for (const auto& [name, _] : subgraph_map_) {
-    if (std::regex_match(name, std::regex(R"(^model\.\d+\.s\d+$)"))) {
-      has_valid_subgraph = true;
-      break;
+    subgraph_map_[chunk_name] = subgraphs[chunk_name];
+  } else {
+    // Original monolithic path: validate against model.x.sN regex, exclude "model" wrapper.
+    std::regex model_pattern(R"(^model(\.\d+\.s\d+)?$)");
+    for (const auto& [name, _] : subgraphs) {
+      if (!std::regex_match(name, model_pattern)) {
+        MLLM_ERROR("LLM2QnnLoweringPass: Unexpected subgraph name {}, expected pattern: model or model.x.sx", name);
+        return ir::PASS_RET_FAILURE;
+      }
     }
-  }
-
-  if (!has_valid_subgraph) {
-    MLLM_ERROR("LLM2QnnLoweringPass: No valid subgraph found (expected model.x.sN pattern)");
-    return ir::PASS_RET_FAILURE;
+    for (const auto& [name, subgraph] : subgraphs) {
+      if (name != "model") { subgraph_map_[name] = subgraph; }
+    }
+    bool has_valid_subgraph = false;
+    for (const auto& [name, _] : subgraph_map_) {
+      if (std::regex_match(name, std::regex(R"(^model\.\d+\.s\d+$)"))) {
+        has_valid_subgraph = true;
+        break;
+      }
+    }
+    if (!has_valid_subgraph) {
+      MLLM_ERROR("LLM2QnnLoweringPass: No valid subgraph found (expected model.x.sN pattern)");
+      return ir::PASS_RET_FAILURE;
+    }
   }
 
   // Sort subgraphs by name to ensure deterministic processing order

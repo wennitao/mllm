@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "QnnLog.h"
+#include "HTP/QnnHtpContext.h"
 
 #include "mllm/backends/qnn/QNNBackend.hpp"
 #include "mllm/backends/qnn/QNNUtils.hpp"
@@ -633,7 +634,38 @@ bool QNNBackend::createContext() {
 }
 
 bool QNNBackend::loadContext(const std::string& contextPath) {
-  if (!runtime_->retrieveContext(contextPath, context_, qnnModels_, nullptr)) { return false; }
+  // Optionally enable a SHARED spill-fill buffer across all graphs in this
+  // context, gated by env var MLLM_QNN_SPILLFILL_MB (megabytes; unset/0 = off).
+  //
+  // The split-prefill bin packs 2L+1 graphs that execute strictly
+  // sequentially; by default QNN reserves each graph's HTP spill-fill scratch
+  // separately and the load-time PD memory estimate SUMS them (~821 MB at
+  // Sq=1024 over 57 graphs), overflowing the V79 PD cap. Registering the
+  // context to a single-context group with a fixed maxSpillFillBuffer makes
+  // every graph share one buffer sized to the largest graph's need (~46 MB),
+  // cutting ~700 MB off the estimate.
+  //
+  // Off by default because the group-registration config is not free for all
+  // bins (single-/few-graph contexts like the dense and mono runners abort at
+  // init with it on). The split runner opts in by exporting
+  // MLLM_QNN_SPILLFILL_MB before init.
+  QnnHtpContext_CustomConfig_t sf_custom;
+  QnnContext_Config_t sf_cfg;
+  QnnContext_Config_t* ctx_cfgs[2] = {nullptr, nullptr};
+  if (const char* mb_env = std::getenv("MLLM_QNN_SPILLFILL_MB")) {
+    uint64_t mb = std::strtoull(mb_env, nullptr, 10);
+    if (mb > 0) {
+      sf_custom.option = QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_MULTI_CONTEXTS;
+      sf_custom.groupRegistration.firstGroupHandle = 0;  // 0 → register a new group; this context is first
+      sf_custom.groupRegistration.maxSpillFillBuffer = mb * 1024ull * 1024ull;
+      sf_cfg.option = QNN_CONTEXT_CONFIG_OPTION_CUSTOM;
+      sf_cfg.customConfig = static_cast<QnnContext_CustomConfig_t>(&sf_custom);
+      ctx_cfgs[0] = &sf_cfg;
+      MLLM_INFO("QNN shared spill-fill buffer enabled: {} MB", mb);
+    }
+  }
+
+  if (!runtime_->retrieveContext(contextPath, context_, qnnModels_, ctx_cfgs[0] ? ctx_cfgs : nullptr)) { return false; }
   // fill qnnModelIndexMap_ info according to qnnModels_
   for (size_t i = 0; i < qnnModels_.size(); i++) {
     auto graphName = qnnModels_[i]->getQnnGraphName();

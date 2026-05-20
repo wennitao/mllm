@@ -37,13 +37,41 @@ void ConcatOp::reshape(const std::vector<Tensor>& inputs, std::vector<Tensor>& o
     return;
   }
 
-  // Check
+  // Rank check FIRST. The original code only iterated `n_dims = inputs[0].shape().size()`
+  // and compared positionally — if inputs had different ranks, the loop would
+  // silently compare unrelated dims (or worse, accept a mismatch coincidence,
+  // e.g., when seq_len happens to equal head_dim). Catch it here with shape
+  // dump for debugging.
+  auto dump_shapes = [&]() {
+    std::string s;
+    for (size_t j = 0; j < inputs.size(); ++j) {
+      s += "[" + std::to_string(j) + "]=(";
+      for (int dd = 0; dd < (int)inputs[j].shape().size(); ++dd) {
+        s += std::to_string(inputs[j].shape()[dd]);
+        if (dd + 1 < (int)inputs[j].shape().size()) s += ",";
+      }
+      s += ") ";
+    }
+    return s;
+  };
+  for (size_t i = 1; i < inputs.size(); ++i) {
+    if (inputs[i].shape().size() != inputs[0].shape().size()) {
+      MLLM_ERROR_EXIT(ExitCode::kCoreError,
+                      "ConcatOp: rank mismatch at input[{}] ({}D vs {}D) shapes={}",
+                      i, inputs[i].shape().size(), inputs[0].shape().size(), dump_shapes());
+      return;
+    }
+  }
+
+  // Check non-concat dim sizes.
   for (int d = 0; d < n_dims; ++d) {
     if (d == at_dim) continue;
     const int ref = inputs[0].shape()[d];
     for (size_t i = 1; i < inputs.size(); ++i) {
       if (inputs[i].shape()[d] != ref) {
-        MLLM_ERROR_EXIT(ExitCode::kCoreError, "ConcatOp: non-concat dim {} mismatch ({} vs {})", d, ref, inputs[i].shape()[d]);
+        MLLM_ERROR_EXIT(ExitCode::kCoreError,
+                        "ConcatOp: at_dim={} non-concat dim {} mismatch ({} vs {}) shapes={}",
+                        at_dim, d, ref, inputs[i].shape()[d], dump_shapes());
         return;
       }
     }
