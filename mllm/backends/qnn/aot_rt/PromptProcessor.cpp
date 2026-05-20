@@ -138,6 +138,35 @@ int64_t PromptProcessor<T>::prefill(const std::vector<int64_t>& prompt_tokens, i
 
     int32_t n_update = chunk_size;
 
+    // Tap-point: dump layer-L K and V output bytes (post-RoPE for K,
+    // post-projection for V, both pre-cache-write).
+    // K layout: [num_heads, head_dim, ar_len] of sizeof(T) bytes each.
+    // V layout: [num_heads, ar_len, head_dim] of sizeof(T) bytes each.
+    if (const char* layer_env = std::getenv("MLLM_DUMP_K_LAYER")) {
+      int layer = std::atoi(layer_env);
+      if (layer >= 0 && layer < config_.num_layers) {
+        size_t bytes = sizeof(T) * (size_t)config_.num_heads * (size_t)config_.head_dim * (size_t)config_.ar_len;
+        if (const char* path = std::getenv("MLLM_DUMP_K_PATH")) {
+          const auto& k_caches_dump = kv_manager_->getKCache();
+          FILE* f = std::fopen(path, "wb");
+          if (f) {
+            std::fwrite(k_caches_dump[layer].output_buffer, 1, bytes, f);
+            std::fclose(f);
+          }
+          MLLM_INFO("[dump_k] dense: layer={} wrote {} bytes to {}", layer, bytes, path);
+        }
+        if (const char* vpath = std::getenv("MLLM_DUMP_V_PATH")) {
+          const auto& v_caches_dump = kv_manager_->getVCache();
+          FILE* f = std::fopen(vpath, "wb");
+          if (f) {
+            std::fwrite(v_caches_dump[layer].output_buffer, 1, bytes, f);
+            std::fclose(f);
+          }
+          MLLM_INFO("[dump_v] dense: layer={} wrote {} bytes to {}", layer, bytes, vpath);
+        }
+      }
+    }
+
     kv_manager_->updateCache(config_.ar_len, current_pos, n_update, {});
 
     kv_manager_->updateAttentionMask(input_tensors_[2].ptr<uint16_t>(), config_.ar_len, current_pos, n_update);
@@ -149,6 +178,14 @@ int64_t PromptProcessor<T>::prefill(const std::vector<int64_t>& prompt_tokens, i
   }
 
   auto logits = output_tensors_[0].to(kCPU).squeeze(0)[{kAll, ((int)num_tokens + config_.ar_len - 1) % config_.ar_len, kAll}];
+
+  if (const char* p = std::getenv("MLLM_DUMP_LOGITS")) {
+    auto* data = logits.ptr<uint16_t>();
+    size_t n = (size_t)config_.vocab_size;
+    FILE* f = std::fopen(p, "wb");
+    if (f) { std::fwrite(data, sizeof(uint16_t), n, f); std::fclose(f); }
+    MLLM_INFO("[dump_logits] dense: wrote {} u16 to {}", n, p);
+  }
 
   auto cur_token = module_->sampleGreedy(logits);
 
