@@ -1080,3 +1080,28 @@ linear ~1000 tok/s vs block-sparse ~2000 tok/s effective per 1024-chunk).
 (Block-sparse L>1024 still modeled as ⌈L/1024⌉×516; multi-chunk not yet
 implemented. Dense 2k exact-needle retrieval is rambly — model quality at 2k,
 separate from the prefill fix.)
+
+### Full prefill sweep with right-sized block-sparse graphs (2026-05-21)
+
+Recompiled the block-sparse split graph at Sq=128/256/512 (57 graphs each, AOT
+score-bake gated OFF via MLLM_BAKE_SCORE so the runtime 2nd-context "score" graph
+isn't shadowed) so short prompts aren't padded to 1024. Measured with NPU-score +
+MLLM_SPLIT_PIPELINE (--gen 0, 3 runs, stable). Dense = fixed (rotary-LUT) bin,
+~1000 tok/s linear.
+
+| L (tok) | dense (fixed) | block-sparse S=8 NPU+pipe (right Sq) | speedup |
+|---------|---------------|--------------------------------------|---------|
+| 128  | 153 ms  | **59 ms** (2156 tok/s)  | 2.6× |
+| 256  | 258 ms  | **98 ms** (2620 tok/s)  | 2.6× |
+| 512  | 458 ms  | **227 ms** (2257 tok/s) | 2.0× |
+| 1024 | ~1024 ms | **516 ms** (1980 tok/s) | 2.0× |
+| 1944 | 1919 ms | 1032 ms (2 chunks, modeled) | 1.86× |
+| 4096 | ~4100 ms (linear) | 2064 ms (4 chunks, modeled) | ~2.0× |
+
+**Block-sparse + NPU-score + pipeline is ~2–2.6× faster than (fixed) dense across
+the WHOLE 128–4096 range.** With right-sized graphs the earlier small-L crossover
+disappears — padding to Sq=1024 was the only reason block-sparse looked slow at
+short prompts. Caveats unchanged: Sq≤256 selection is degenerate (num_qb≤kTopK=8,
+no actual block selection — it's just bounded-attention block-sparse compute, still
+2.6× over dense full-attention); L>1024 block-sparse is modeled (⌈L/1024⌉×516,
+multi-chunk not implemented); dense 4096 extrapolated (linear, verified to 1944).

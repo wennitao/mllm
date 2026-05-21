@@ -305,7 +305,11 @@ MLLM_MAIN({
   // Lr=Sq/S, SD=S·D. The runner fills them per layer and dispatches per layer;
   // it MUST use this same stride. (S=8 keeps the [Hq,Lr,Lr] readback small.)
   constexpr int kScoreStride = 8;
-  {
+  // The AOT-baked score graph is OFF by default: the runtime builds its own
+  // "score" graph in a 2nd context, and a baked "score" in the model context
+  // would shadow it (createQnnGraph returns the existing one). Opt in with
+  // MLLM_BAKE_SCORE only if you want the in-context score variant.
+  if (std::getenv("MLLM_BAKE_SCORE")) {
     if (Sq % kScoreStride != 0) {
       MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "Sq={} not divisible by score stride {}", Sq, kScoreStride);
     }
@@ -347,7 +351,7 @@ MLLM_MAIN({
     chunk_order.push_back("attn_" + std::to_string(i));
     chunk_order.push_back("chunk_" + std::to_string(i + 1));
   }
-  chunk_order.push_back("score");  // NPU block-selection matmul (one shared graph)
+  if (std::getenv("MLLM_BAKE_SCORE")) chunk_order.push_back("score");  // AOT score (opt-in)
   // Fast-feasibility: lower ONLY the score graph (validates fp16-matmul lowering
   // + saves a throwaway context quickly) when MLLM_SCORE_ONLY is set.
   if (std::getenv("MLLM_SCORE_ONLY")) { chunk_order = {"score"}; }
