@@ -1007,3 +1007,41 @@ Warm steady-state (single prefill, Sq=1024, S=8): kc ~22 ms, matmul ~17 ms,
 softmax+pool ~20 ms → **scoring ~59 ms, prefill ~569 ms (1799 tok/s)** — ~90 ms
 over the 478 ms no-score floor, ~1.5× faster than dense. (Decode-by-reprefill
 inflates the first prefill via cold-start; warm prefills are ~569–600 ms.)
+
+### Pipeline: overlap CPU scoring with NPU attn (2026-05-21)
+
+Per-qb profiling (MLLM_QB_PROFILE) of the NPU-score path, steady state (qb>8):
+sel (softmax+pool, CPU) ~120 µs · gather+stage (CPU) ~36 µs · attn dispatch
+(NPU) ~130 µs. Plus a per-layer prelude on the first scored qb (qb8): de-transpose
+(CPU) + score-matmul (NPU), ~1.4 ms warm. Totals over 28 layers: sel 72.7 ms,
+gather 44.5 ms, attn 139 ms → qb-loop 256 ms (run SERIALLY).
+
+Crucially, with NPU scoring the per-qb CPU work (sel+gather ~156 µs) is now
+COMPARABLE to the NPU attn (~130 µs), so the existing Option-2 pipeline
+(MLLM_SPLIT_PIPELINE: worker scores sel(qb+1) while main gathers+dispatches
+attn(qb)) finally pays off — unlike the CPU-score case where per-qb scoring was
+huge. The per-qb softmax hides behind attn; only the per-layer prelude stays
+exposed (split timing: pp_wait ~28 ms = the de-transpose+matmul main waits on).
+
+**A/B (--gen 0, NPU-score, Sq=1024):**
+
+| | prefill | tok/s |
+|---|---------|-------|
+| serial   | ~635 ms (631/690/635) | ~1610 |
+| **+ MLLM_SPLIT_PIPELINE** | **~516 ms (517/515/516)** | **~1980** |
+
+~1.23× faster AND far more stable (515–517 ms vs serial's 631–690 noise).
+Retrieves 8090293 correctly under the concurrent worker. Final standing for
+block-sparse + XAttention selection at Sq=1024:
+
+| path | prefill | vs dense |
+|------|---------|----------|
+| dense full-attn (ref) | ~850 ms | 1.0× |
+| **NPU-score + pipeline** | **~516 ms** | **1.65× faster** |
+| no-score floor | 478 ms | 1.78× |
+| CPU-score S=8 | 1084 ms | 0.78× (slower) |
+
+Now only ~38 ms over the no-score floor. Remaining exposed cost = the per-layer
+prelude (de-transpose 22 ms + score-matmul 17 ms across 28 layers, ~pp_wait);
+hiding it would need overlapping de-transpose(L+1) with attn(L), bounded by Q
+from chunk_{L+1} arriving only after layer L's qb loop.
