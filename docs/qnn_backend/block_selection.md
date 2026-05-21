@@ -1045,3 +1045,38 @@ Now only ~38 ms over the no-score floor. Remaining exposed cost = the per-layer
 prelude (de-transpose 22 ms + score-matmul 17 ms across 28 layers, ~pp_wait);
 hiding it would need overlapping de-transpose(L+1) with attn(L), bounded by Q
 from chunk_{L+1} arriving only after layer L's qb loop.
+
+### Dense >1024 prefill bug FIXED — missing rotary LUT bake (2026-05-21)
+
+Verifying the dense baseline at 2k revealed dense produced garbage ("!") for ANY
+prompt >1024 tokens (even coherent text), with prefill time saturating flat at
+~880 ms beyond 1024. Bisected to an exact 1024 boundary; not CL (recompiling at
+CL=4096 didn't fix it) and not the sliding-window mask (doesn't trigger at these
+sizes).
+
+ROOT CAUSE: `examples/qwen3_qnn_aot/compile_sha.cpp` (dense compiler) never called
+`bakeRotaryEmbeddings`, so the dense bin used the rotary sin/cos LUT shipped in
+the ptq `.mllm` — which is baked for only **1024 positions**. `position_ids > 1024`
+gathered out of bounds → garbage RoPE → garbage output, exactly at 1024. The
+block-sparse split compiler already re-bakes the LUT at `max_cache_length`, and
+each Sq=1024 prefill never exceeds 1024 positions, so block-sparse was unaffected.
+
+FIX: added `bakeRotaryEmbeddings(params, model_cfg)` to compile_sha.cpp (re-bakes
+the uint16-quantized LUT at max_cache_length, removing the stale 1024 one).
+Recompiled at CL=4096. Verified: dense now coherent at 1310/1944 tok, prefill
+LINEAR (818→825, 1310→1303, 1944→1919 ms, ~1000 tok/s), 1k still retrieves 8090293.
+
+CORRECTED dense-vs-block-sparse (the earlier "dense beats BS at 2k" was a broken-
+dense artifact):
+
+| L (tok) | dense (fixed, ~1000 tok/s) | block-sparse S=8 NPU+pipe | speedup |
+|---------|----------------------------|---------------------------|---------|
+| 1024 | ~1024 ms | 516 ms | ~2.0× |
+| 1944 | 1919 ms | 1032 ms (2 chunks) | 1.86× |
+| 4096 | ~4100 ms (linear) | 2064 ms (4 chunks) | ~2.0× |
+
+Block-sparse wins ~2× for L≥1024 and the margin holds at long context (dense
+linear ~1000 tok/s vs block-sparse ~2000 tok/s effective per 1024-chunk).
+(Block-sparse L>1024 still modeled as ⌈L/1024⌉×516; multi-chunk not yet
+implemented. Dense 2k exact-needle retrieval is rambly — model quality at 2k,
+separate from the prefill fix.)

@@ -29,6 +29,64 @@ std::string defaultQnnEnvPath() {
   return "/opt/qcom/aistack/qairt/2.41.0.251128/lib/x86_64-linux-clang/";
 }
 
+// Re-bake the rotary sin/cos LUTs (model.mllm_max_sin/cos_embedding) for the
+// FULL max_cache_length. The ptq .mllm ships a LUT baked for only 1024
+// positions; without this, dense prefill of prompts >1024 tokens gathers RoPE
+// out of bounds → garbage output (exactly at the 1024 boundary). The split
+// compiler already does this; the dense compiler was missing it. uint16-quantized
+// to match the sin/cos_embedding_input_qdq the model applies.
+void bakeRotaryEmbeddings(const mllm::ParameterFile::ptr_t& params, const mllm::models::qwen3::Qwen3Config& cfg) {
+  const int head_dim = cfg.head_dim;
+  const int max_pos = cfg.max_cache_length;
+  const float theta = cfg.rope_theta;
+  const int half = head_dim / 2;
+  std::vector<float> inv_freq(half);
+  for (int k = 0; k < half; ++k) inv_freq[k] = 1.0f / std::pow(theta, (float)(2 * k) / (float)head_dim);
+
+  float sin_scale = 1.0f / 32768.0f, cos_scale = 1.0f / 32768.0f;
+  int32_t sin_zp = 32768, cos_zp = 32768;
+  if (params->has("model.sin_embedding_input_qdq.fake_quant.scale")) {
+    sin_scale = params->pull("model.sin_embedding_input_qdq.fake_quant.scale").item<float>();
+  }
+  if (params->has("model.sin_embedding_input_qdq.fake_quant.zero_point")) {
+    sin_zp = params->pull("model.sin_embedding_input_qdq.fake_quant.zero_point").item<int32_t>();
+  }
+  if (params->has("model.cos_embedding_input_qdq.fake_quant.scale")) {
+    cos_scale = params->pull("model.cos_embedding_input_qdq.fake_quant.scale").item<float>();
+  }
+  if (params->has("model.cos_embedding_input_qdq.fake_quant.zero_point")) {
+    cos_zp = params->pull("model.cos_embedding_input_qdq.fake_quant.zero_point").item<int32_t>();
+  }
+
+  auto quantize = [](float v, float scale, int32_t zp) -> uint16_t {
+    long q = std::lround(v / scale) + zp;
+    if (q < 0) q = 0;
+    if (q > 65535) q = 65535;
+    return (uint16_t)q;
+  };
+
+  std::vector<uint16_t> sin_buf((size_t)max_pos * head_dim);
+  std::vector<uint16_t> cos_buf((size_t)max_pos * head_dim);
+  for (int p = 0; p < max_pos; ++p) {
+    for (int k = 0; k < half; ++k) {
+      float ang = (float)p * inv_freq[k];
+      float s = std::sin(ang), c = std::cos(ang);
+      sin_buf[(size_t)p * head_dim + k] = quantize(s, sin_scale, sin_zp);
+      sin_buf[(size_t)p * head_dim + k + half] = quantize(s, sin_scale, sin_zp);
+      cos_buf[(size_t)p * head_dim + k] = quantize(c, cos_scale, cos_zp);
+      cos_buf[(size_t)p * head_dim + k + half] = quantize(c, cos_scale, cos_zp);
+    }
+  }
+  auto sin_t = mllm::Tensor::fromVector(sin_buf, {1, max_pos, head_dim}, mllm::kUInt16);
+  auto cos_t = mllm::Tensor::fromVector(cos_buf, {1, max_pos, head_dim}, mllm::kUInt16);
+  if (params->has("model.mllm_max_sin_embedding")) params->remove("model.mllm_max_sin_embedding");
+  if (params->has("model.mllm_max_cos_embedding")) params->remove("model.mllm_max_cos_embedding");
+  params->push("model.mllm_max_sin_embedding",
+               sin_t.contiguous().setMemType(mllm::kParamsNormal).setName("model.mllm_max_sin_embedding"));
+  params->push("model.mllm_max_cos_embedding",
+               cos_t.contiguous().setMemType(mllm::kParamsNormal).setName("model.mllm_max_cos_embedding"));
+}
+
 }  // namespace
 
 MLLM_MAIN({
@@ -73,6 +131,11 @@ MLLM_MAIN({
   mllm::print("Preparing SHA parameters (slicing MHA weights)...");
   mllm::models::qwen3::sha::prepareParametersForSHA(params, model_cfg);
   mllm::print("SHA parameters prepared.");
+
+  // Re-bake the rotary LUTs at CL (ptq .mllm ships a 1024-position LUT → dense
+  // prefill >1024 tokens was garbage). See bakeRotaryEmbeddings above.
+  bakeRotaryEmbeddings(params, model_cfg);
+  mllm::print("Rotary sin/cos LUTs baked for {} positions.", CL);
 
   // Create SHA model
   auto model = mllm::models::qwen3::sha::Qwen3ForCausalLM_SHA(model_cfg);
