@@ -633,6 +633,51 @@ bool QNNBackend::createContext() {
   return true;
 }
 
+bool QNNBackend::beginAuxContext(uint64_t max_spill_fill_mb) {
+  if (aux_context_ != nullptr) {
+    MLLM_ERROR("beginAuxContext: aux context already open");
+    return false;
+  }
+  // Create a 2nd context that JOINS the model context's spill-fill group, so it
+  // shares the model's spill-fill buffer rather than reserving its own. The
+  // group's max buffer is fixed by the first (model) context; this value is
+  // disregarded for joiners but must be set.
+  QnnHtpContext_CustomConfig_t sf_custom;
+  sf_custom.option = QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_MULTI_CONTEXTS;
+  sf_custom.groupRegistration.firstGroupHandle = context_;  // join the model context's group
+  sf_custom.groupRegistration.maxSpillFillBuffer = max_spill_fill_mb * 1024ull * 1024ull;
+  QnnContext_Config_t sf_cfg;
+  sf_cfg.option = QNN_CONTEXT_CONFIG_OPTION_CUSTOM;
+  sf_cfg.customConfig = static_cast<QnnContext_CustomConfig_t>(&sf_custom);
+  const QnnContext_Config_t* cfgs[2] = {&sf_cfg, nullptr};
+
+  // Call contextCreate directly (QNNRuntime::createContext mis-passes &config
+  // for non-null configs; only ever used with nullptr elsewhere).
+  if (QNN_CONTEXT_NO_ERROR
+      != runtime_->qnnInterface.contextCreate(runtime_->backendHandle, runtime_->deviceHandle, cfgs, &aux_context_)) {
+    MLLM_ERROR("beginAuxContext: failed to create aux context");
+    aux_context_ = nullptr;
+    return false;
+  }
+  // Redirect graph building + tensor registration to the aux context.
+  main_context_ = context_;
+  context_ = aux_context_;
+  static_pointer_cast<QNNAllocator>(allocator_)->setQNNPointer(runtime_->qnnInterface, aux_context_);
+  MLLM_INFO("beginAuxContext: aux context open (sharing model spill-fill group)");
+  return true;
+}
+
+void QNNBackend::endAuxContext() {
+  if (main_context_ == nullptr) return;  // not active
+  // Restore the model context for any subsequent model-side ops. Tensors already
+  // registered against the aux context keep their handles (registered once), so
+  // graphExecute on aux-context graphs still works.
+  context_ = main_context_;
+  main_context_ = nullptr;
+  static_pointer_cast<QNNAllocator>(allocator_)->setQNNPointer(runtime_->qnnInterface, context_);
+  MLLM_INFO("endAuxContext: model context restored (aux context retained for execute)");
+}
+
 bool QNNBackend::loadContext(const std::string& contextPath) {
   // Optionally enable a SHARED spill-fill buffer across all graphs in this
   // context, gated by env var MLLM_QNN_SPILLFILL_MB (megabytes; unset/0 = off).

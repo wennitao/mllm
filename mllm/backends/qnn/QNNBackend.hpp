@@ -97,6 +97,18 @@ class QNNBackend final : public Backend {
   bool createContext();
   void saveContext(const std::string& contextPath = "qnn_context.bin");
 
+  // Open a SECOND HTP context for building extra graphs at runtime (e.g. the
+  // block-selection score matmul) alongside the loaded binary model context
+  // (which is immutable). The aux context joins the model context's spill-fill
+  // group (firstGroupHandle = model context) so it shares the model's spill-fill
+  // buffer instead of reserving its own — the documented multi-context pattern.
+  // While open, context_/allocator point at the aux context, so the normal
+  // createQnnGraph/addTensor/graphAddNode/graphFinalize + kQNN tensor allocs all
+  // land in (and memRegister against) the aux context. Call endAuxContext()
+  // when done; graphExecute() afterwards still works (graphs hold their handle).
+  bool beginAuxContext(uint64_t max_spill_fill_mb);
+  void endAuxContext();
+
   bool isWeightOnDevice() override { return false; }
 
   // QNN Graph build interfaces
@@ -131,6 +143,8 @@ class QNNBackend final : public Backend {
   bool debug_;  // controlled by -DMLLM_QNN_DEBUG compile flag
   ProfilingLevel profilingLevel_;
   Qnn_ContextHandle_t context_ = nullptr;
+  Qnn_ContextHandle_t aux_context_ = nullptr;   // 2nd context for runtime-built graphs
+  Qnn_ContextHandle_t main_context_ = nullptr;  // saved model context while aux is active
   std::unique_ptr<QNNRuntime> runtime_;
   std::unique_ptr<QNNPerf> perf_;
 

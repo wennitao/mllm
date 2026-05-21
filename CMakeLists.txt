@@ -19,6 +19,7 @@ option(MLLM_BUILD_ARM_BACKEND "Enable MLLM ARM backend" OFF)
 option(MLLM_BUILD_OPENCL_BACKEND "Enable MLLM OpenCL backend" OFF)
 option(MLLM_BUILD_CUDA_BACKEND "Enable MLLM CUDA backend" OFF)
 option(MLLM_BUILD_QNN_BACKEND "Enable MLLM QNN backend" OFF)
+option(MLLM_QNN_DEBUG "Enable QNN debug mode (NATIVE tensors become APP_READ)" OFF)
 option(MLLM_BUILD_ASCEND_BACKEND "Enable MLLM Ascend backend" OFF)
 option(MLLM_BUILD_SDK_C_BINDING "Enable MLLM C SDK binding" ON)
 option(MLLM_BUILD_EXPERIMENTS "Enable MLLM experiments" OFF)
@@ -209,6 +210,10 @@ else()
   set(OpenMP_C_LIB_NAMES "")
   set(OpenMP_CXX_LIB_NAMES "")
   set(OpenMP_omp_LIBRARY "")
+endif()
+
+if(MLLM_QNN_DEBUG)
+  add_compile_definitions(MLLM_QNN_DEBUG)
 endif()
 
 # Handle Performance components

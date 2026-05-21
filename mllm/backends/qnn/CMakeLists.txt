@@ -45,6 +45,20 @@ message(STATUS "MLLM_QNN INCLUDES: ${current_includes}") #print include director
 
 target_link_libraries(MllmQNNBackend PUBLIC MllmRT)
 
+# OpenMP — needed for the #pragma omp parallel loops in the AOT runtime
+# (e.g. ShaBlockSparsePromptProcessorSplit::computeBlockScores block scoring).
+# MllmRT's OpenMP usage requirements don't propagate the compile flag here, so
+# apply it explicitly (mirrors the OpenCL backend).
+if(MLLM_KERNEL_THREADS_VENDOR_OPENMP)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR APPLE)
+    target_link_libraries(MllmQNNBackend PUBLIC ${OpenMP_omp_LIBRARY})
+    target_compile_options(MllmQNNBackend PUBLIC ${OpenMP_CXX_FLAGS})
+  else()
+    target_link_libraries(MllmQNNBackend PUBLIC -fopenmp)
+    target_compile_options(MllmQNNBackend PUBLIC -fopenmp)
+  endif()
+endif()
+
 install(
   TARGETS MllmQNNBackend
   EXPORT MllmTargets

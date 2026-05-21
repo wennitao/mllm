@@ -485,6 +485,29 @@ class AttnChunkModule final : public nn::Module {
 };
 
 // ============================================================================
+// XAttention SCORE graph (NPU-offloaded block-selection matmul). One shared,
+// weightless graph reused for every layer: logits = qr · kcᵀ. Inputs are the
+// reduced antidiagonal-packed Q and K for a layer (fp16, [Hq, Lr, S·D]); output
+// is the raw logit grid [Hq, Lr, Lr]. The history-only block-causal softmax and
+// the block-pool stay on CPU in the runner (the per-layer `temp` scale and the
+// staircase causal mask are applied there), so this graph carries no per-layer
+// constants and can be a single reused dispatch. Compiled at a FIXED stride
+// (S=8 → SD=1024, Lr=Sq/8); the runner must build qr/kc at that same stride.
+// ============================================================================
+class ScoreModule final : public nn::Module {
+ public:
+  ScoreModule() = default;
+  explicit ScoreModule(const std::string& name) : nn::Module(name) {}
+  std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>&) override {
+    // logits [Hq, Lr, Lr] = qr [Hq, Lr, SD] · kcT [Hq, SD, Lr]. NON-transposed:
+    // the AOT MatMul lowering pattern (visitor/Matmul.cpp) ignores transpose
+    // flags, so kcT must be supplied pre-transposed (the runner builds it that
+    // way). This mirrors the attn QK matmul, which feeds K as [D, hist].
+    return {nn::functional::matmul(inputs[0], inputs[1], /*transpose_a=*/false, /*transpose_b=*/false)};
+  }
+};
+
+// ============================================================================
 // CausalLM wrapper with multi-chunk trace driver. Returns 2L+1 IRs keyed by:
 //   "chunk_0", "chunk_1", ..., "chunk_L", "attn_0", "attn_1", ..., "attn_{L-1}".
 //
@@ -536,6 +559,18 @@ class Qwen3ForCausalLM_SHABlockSparseCausalSplit : public ARGeneration, public n
       ir::lowlevel::traceStart();
       (void)chunk0(input_ids, position_ids);
       result["chunk_0"] = ir::lowlevel::traceStop();
+    }
+
+    // -------- score (one shared, weightless block-selection matmul graph) -----
+    // Traced once; the runner dispatches it per layer with that layer's qr/kc.
+    // Only present when the compile driver supplies score_qr/score_kc inputs.
+    if (input.count("score_qr") && input.count("score_kc")) {
+      ScoreModule score("score");
+      auto qr = input.at("score_qr");
+      auto kc = input.at("score_kc");
+      ir::lowlevel::traceStart();
+      (void)score(qr, kc);
+      result["score"] = ir::lowlevel::traceStop();
     }
 
     // -------- per-layer: attn_i then chunk_{i+1} -----------------------------

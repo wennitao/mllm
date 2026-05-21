@@ -299,13 +299,36 @@ MLLM_MAIN({
     }
   }
 
+  // ----- score graph inputs (NPU block-selection matmul, FIXED stride S=8) ---
+  // One shared weightless "score" graph: logits = qr · kcᵀ. qr/kc are the
+  // reduced antidiagonal-packed Q/K for a layer, fp16 [Hq, Lr, SD] with
+  // Lr=Sq/S, SD=S·D. The runner fills them per layer and dispatches per layer;
+  // it MUST use this same stride. (S=8 keeps the [Hq,Lr,Lr] readback small.)
+  constexpr int kScoreStride = 8;
+  {
+    if (Sq % kScoreStride != 0) {
+      MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "Sq={} not divisible by score stride {}", Sq, kScoreStride);
+    }
+    const int Lr = Sq / kScoreStride;
+    const int SD = kScoreStride * D;
+    // The score graph processes Hq/2 heads per dispatch so its working set fits
+    // the 8 MB VTCM (→ ~0 DDR spill-fill; a full-Hq graph spilled 43.8 MB and
+    // blew the V79 PD cap). The runner dispatches it twice/layer. kScoreHeadSplit
+    // in ShaBlockSparsePromptProcessorSplit must match this divisor (2).
+    const int Hq_score = Hq / 2;
+    // kc is pre-TRANSPOSED to [Hh, SD, Lr] so the matmul is non-transposed
+    // (the AOT MatMul lowering ignores transpose flags). logits = qr · kc.
+    trace_inputs["score_qr"] = mllm::Tensor::zeros({Hq_score, Lr, SD}, mllm::kFloat16);
+    trace_inputs["score_kc"] = mllm::Tensor::zeros({Hq_score, SD, Lr}, mllm::kFloat16);
+  }
+
   fprintf(stderr, "[STEP 6] trace_inputs built (%zu entries).\n", trace_inputs.size()); fflush(stderr);
 
   // ===========================================================================
   // Trace — returns 2L+1 IRs keyed by chunk_0, chunk_1, ..., chunk_L, attn_0,
   // ..., attn_{L-1}.
   // ===========================================================================
-  mllm::print("Tracing SPLIT model (Sq={}, BQ={}, L={}, expected graphs={})...", Sq, BQ, L, 2 * L + 1);
+  mllm::print("Tracing SPLIT model (Sq={}, BQ={}, L={}, expected graphs={})...", Sq, BQ, L, 2 * L + 2);
   auto ir = model.trace(trace_inputs, {});
   mllm::print("Trace complete. {} IRs produced.", ir.size());
 
@@ -318,12 +341,16 @@ MLLM_MAIN({
   // Lower each chunk independently. The shared qnn_aot_env accumulates them
   // all into one context binary.
   std::vector<std::string> chunk_order;
-  chunk_order.reserve(2 * L + 1);
+  chunk_order.reserve(2 * L + 2);
   chunk_order.push_back("chunk_0");
   for (int i = 0; i < L; ++i) {
     chunk_order.push_back("attn_" + std::to_string(i));
     chunk_order.push_back("chunk_" + std::to_string(i + 1));
   }
+  chunk_order.push_back("score");  // NPU block-selection matmul (one shared graph)
+  // Fast-feasibility: lower ONLY the score graph (validates fp16-matmul lowering
+  // + saves a throwaway context quickly) when MLLM_SCORE_ONLY is set.
+  if (std::getenv("MLLM_SCORE_ONLY")) { chunk_order = {"score"}; }
   for (const auto& name : chunk_order) {
     if (ir.find(name) == ir.end()) {
       MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "Missing IR for {}", name);
@@ -349,7 +376,7 @@ MLLM_MAIN({
   }  // end trace_inputs + ir scope
 
   qnn_aot_env.saveContext("context.0", "qwen3-lpbq-sha-blocksparse-causal-split.bin");
-  mllm::print("SPLIT-PREFILL compilation complete. {} graphs in one context.", 2 * L + 1);
+  mllm::print("SPLIT-PREFILL compilation complete. {} graphs in one context (incl. 1 score).", 2 * L + 2);
 
   // FIXME(split-prefill): at Sq=1024 the program-exit destructor chain
   // crashes inside align_free → TensorStorage::~ → QNNTensorWrapper::~ →

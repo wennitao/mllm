@@ -439,6 +439,52 @@ only materializes when the prompt fills most of the chunk, so in practice pick
 the smallest Sq ≥ prompt length. At the 256/512/1024 granularity split is
 **~1.6–1.75× faster** than dense/mono on chunk-filling prompts.
 
+## CPU/NPU pipelining of the per-qb attention (2026-05-20)
+
+The split per-qb attention loop was synchronous: for each qb, CPU prep (mask +
+block-select + K/V gather + staging) → blocking NPU `attn_i` dispatch →
+writeback, all serial. Two changes made it overlap the CPU prep of qb+1 with
+the NPU compute of qb.
+
+**1. Double-buffer the per-qb staging (2 slots, was L per-layer copies).**
+`q_qb_/k_curr_qb_/v_curr_qb_/attn_output_qb_/k_arranged_/v_arranged_/mask_`
+become size-2 (indexed `qb&1`), shared across layers (bound by position, no
+rename — safe, same as the mask always was). This alone sped the *sync* path
+up **531 → 478 ms** at Sq=1024 (973 tok) — fewer, smaller rpcmem buffers →
+better cache/DRAM locality — and cut staging memory from ~16 MB to ~1 MB.
+
+**2. Persistent prep worker, pinned to the prime cores** (env
+`MLLM_SPLIT_PIPELINE=1`, worker CPUs `MLLM_PIPELINE_WORKER_CPUS`, default
+`6,7`). The worker prepares qb+1's slot while the main thread runs the NPU
+dispatch for qb. Safe to overlap because `copy_kv_to_cache` runs *before* the
+qb loop, so gather(qb+1) only reads already-committed cache — independent of
+attn(qb) — and the two touch opposite slots.
+
+**Affinity is essential.** Timing breakdown (Sq=1024, 973 tok, summed over all
+layers/qbs, via `MLLM_SPLIT_PIPELINE_TIMING=1`):
+
+| Config | prep (main) | NPU dispatch | pp_wait | total prefill |
+| --- | ---: | ---: | ---: | ---: |
+| Sync | 41.7 ms | 131.9 ms | — | **478 ms** |
+| Pipeline, no affinity | 1.8 ms | 130 ms | **59.1 ms** | 503 ms (slower!) |
+| Pipeline, worker on prime {6,7} | 1.2 ms | 131 ms | **0.03 ms** | **439 ms** |
+
+Without affinity the Android scheduler parks the worker on a 2.78 GHz perf
+core; the concurrent gather runs ~1.5× slower than inline, so the main blocks
+59 ms in `pp_wait` and the pipeline *loses* to sync. Pinned to the 4.09 GHz
+prime cores (SM8750: cpu6/7), the ~42 ms of gather is fully hidden behind the
+131 ms of NPU dispatch (`pp_wait ≈ 0`), and prefill drops to **437–442 ms**
+(2200–2227 tok/s, stable), with identical output ("…Paris.").
+
+**Net at Sq=1024:** sync→pipeline saves ~38 ms (~8%); combined with the 2-slot
+locality win, **531 → 439 ms (~17%)** vs the pre-session sync baseline, i.e.
+~**1.9× faster than dense** (~833 ms for 973 tok). `std::async`-per-qb was tried
+first and was ~14% *slower* (896 thread spawns) — a persistent worker is
+required. Pipelining is opt-in (`MLLM_SPLIT_PIPELINE`) because the prime-core
+mask is device-specific; the default sync path already includes the 2-slot win.
+
+---
+
 **Bottom line.** Of the three prefill architectures, only **split** beats dense:
 it runs the bulk QKV/O/MLP matmuls once per chunk at M=Sq (amortizing the weight
 read over the whole sequence) and only the cheap attention per-qb at M=BQ=32.

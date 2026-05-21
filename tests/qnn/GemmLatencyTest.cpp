@@ -181,6 +181,120 @@ static void runAttnAV(const std::shared_ptr<QNNBackend>& backend, int Hq, int Sq
 }
 
 // ---------------------------------------------------------------------------
+// XAttention block-selection SCORE CORE on HTP: the reduced antidiagonal
+// scoring matmul + softmax, matching the CPU/GPU "core" in
+// examples/block_selection/bench_block_selection.cpp. Per head:
+//   M = Qr @ Kr^T   ([Hq,Lr,SD] x [Hq,Lr,SD]^T -> [Hq,Lr,Lr], SD = S*d)
+//   O = softmax(M)  over the last (key) axis
+// One graph, two qti.aisw nodes; M is a NATIVE intermediate. Both inputs are
+// dynamic fp16 (Q and K are both runtime tensors here). Reports matmul GFLOP/s
+// from the Qr@Kr^T MAC count (softmax folded into the same wall time).
+// ---------------------------------------------------------------------------
+static void runBlockSelectScore(const std::shared_ptr<QNNBackend>& backend, int Hq, int Lr, int SD,
+                                const std::string& tag) {
+  auto A = Tensor::empty({Hq, Lr, SD}, kFloat16, kQNN).alloc();  // Qr
+  auto B = Tensor::empty({Hq, Lr, SD}, kFloat16, kQNN).alloc();  // Kr
+  auto M = Tensor::empty({Hq, Lr, Lr}, kFloat16, kQNN).alloc();  // scores (native)
+  auto O = Tensor::empty({Hq, Lr, Lr}, kFloat16, kQNN).alloc();  // softmaxed (read)
+
+  std::mt19937 rng(0xB10C5E1u);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  __fp16* ap = A.ptr<__fp16>();
+  __fp16* bp = B.ptr<__fp16>();
+  for (size_t i = 0; i < (size_t)Hq * Lr * SD; ++i) ap[i] = (__fp16)dist(rng);
+  for (size_t i = 0; i < (size_t)Hq * Lr * SD; ++i) bp[i] = (__fp16)dist(rng);
+
+  const std::string graph = "blocksel_" + tag;
+  ASSERT_NE(backend->createQnnGraph(graph), nullptr);
+  ASSERT_TRUE(backend->addTensor(graph, "A", QNN_TENSOR_TYPE_APP_WRITE, A));
+  ASSERT_TRUE(backend->addTensor(graph, "B", QNN_TENSOR_TYPE_APP_WRITE, B));
+  ASSERT_TRUE(backend->addTensor(graph, "M", QNN_TENSOR_TYPE_NATIVE, M));
+  ASSERT_TRUE(backend->addTensor(graph, "O", QNN_TENSOR_TYPE_APP_READ, O));
+
+  std::vector<std::shared_ptr<QNNParamScalarWrapper>> mm_params;
+  mm_params.push_back(QNNParamScalarWrapper::create<bool>("transpose_in1", true));
+  backend->graphAddNode(graph, "matmul", "MatMul", {"A", "B"}, {"M"}, {}, mm_params, "qti.aisw");
+
+  std::vector<std::shared_ptr<QNNParamScalarWrapper>> sm_params;
+  sm_params.push_back(QNNParamScalarWrapper::create("axis", (uint32_t)2));  // last axis of [Hq,Lr,Lr]
+  sm_params.push_back(QNNParamScalarWrapper::create("beta", 1.0f));
+  backend->graphAddNode(graph, "softmax", "Softmax", {"M"}, {"O"}, {}, sm_params, "qti.aisw");
+
+  ASSERT_TRUE(backend->graphFinalize(graph));
+
+  std::vector<Tensor> ins = {A, B};
+  std::vector<Tensor> outs = {O};
+  backend->graphExecute(graph, ins, outs);  // warmup
+
+  const int runs = timingRunsFromEnv();
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < runs; ++i) backend->graphExecute(graph, ins, outs);
+  const auto t1 = std::chrono::steady_clock::now();
+  const double avg_ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / runs;
+
+  const double macs = (double)Hq * Lr * Lr * SD;
+  const double gflops_s = 2.0 * macs / (avg_ms * 1.0e-3) / 1.0e9;
+  fprintf(stderr, "[BLKSEL %-16s]  Hq=%d Lr=%d SD=%d -> O[%d,%d,%d]  avg=%9.4f ms  %8.2f GFLOP/s\n", tag.c_str(), Hq,
+          Lr, SD, Hq, Lr, Lr, avg_ms, gflops_s);
+}
+
+// ---------------------------------------------------------------------------
+// PER-QB granularity on HTP: instead of one [Hq,Lr,Lr] matmul/layer (big-batch),
+// this issues the model's ACTUAL per-qb scoring — num_qb separate MatMul+Softmax
+// dispatches of shape M=BQr(=BQ/S), N=histr(qb)=qb*BKr, K=SD — and reports the
+// SUMMED per-layer time. Tests whether per-dispatch overhead × num_qb beats the
+// single big-batch dispatch (which does ~2× the FLOPs but one launch).
+// ---------------------------------------------------------------------------
+static void runBlockSelectScorePerQb(const std::shared_ptr<QNNBackend>& backend, int Hq, int Lr, int SD,
+                                     const std::string& tag) {
+  const int D = 128, S = SD / D, BQ = 32, BK = 32;
+  const int BQr = BQ / S, BKr = BK / S;
+  const int num_qb = (Lr * S) / BQ;  // = L / BQ
+  const int runs = timingRunsFromEnv();
+  std::mt19937 rng(0xB10C5E1u);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  double total_ms = 0.0, total_macs = 0.0;
+  for (int qb = 1; qb < num_qb; ++qb) {
+    const int M = BQr, N = qb * BKr, K = SD;
+    auto A = Tensor::empty({Hq, M, K}, kFloat16, kQNN).alloc();
+    auto B = Tensor::empty({Hq, N, K}, kFloat16, kQNN).alloc();
+    auto Mt = Tensor::empty({Hq, M, N}, kFloat16, kQNN).alloc();
+    auto O = Tensor::empty({Hq, M, N}, kFloat16, kQNN).alloc();
+    __fp16* ap = A.ptr<__fp16>();
+    for (size_t i = 0; i < (size_t)Hq * M * K; ++i) ap[i] = (__fp16)dist(rng);
+    __fp16* bp = B.ptr<__fp16>();
+    for (size_t i = 0; i < (size_t)Hq * N * K; ++i) bp[i] = (__fp16)dist(rng);
+    const std::string graph = "blkselqb_" + tag + "_" + std::to_string(qb);
+    ASSERT_NE(backend->createQnnGraph(graph), nullptr);
+    ASSERT_TRUE(backend->addTensor(graph, "A", QNN_TENSOR_TYPE_APP_WRITE, A));
+    ASSERT_TRUE(backend->addTensor(graph, "B", QNN_TENSOR_TYPE_APP_WRITE, B));
+    ASSERT_TRUE(backend->addTensor(graph, "M", QNN_TENSOR_TYPE_NATIVE, Mt));
+    ASSERT_TRUE(backend->addTensor(graph, "O", QNN_TENSOR_TYPE_APP_READ, O));
+    std::vector<std::shared_ptr<QNNParamScalarWrapper>> mm_params;
+    mm_params.push_back(QNNParamScalarWrapper::create<bool>("transpose_in1", true));
+    backend->graphAddNode(graph, "matmul", "MatMul", {"A", "B"}, {"M"}, {}, mm_params, "qti.aisw");
+    std::vector<std::shared_ptr<QNNParamScalarWrapper>> sm_params;
+    sm_params.push_back(QNNParamScalarWrapper::create("axis", (uint32_t)2));
+    sm_params.push_back(QNNParamScalarWrapper::create("beta", 1.0f));
+    backend->graphAddNode(graph, "softmax", "Softmax", {"M"}, {"O"}, {}, sm_params, "qti.aisw");
+    ASSERT_TRUE(backend->graphFinalize(graph));
+    std::vector<Tensor> ins = {A, B};
+    std::vector<Tensor> outs = {O};
+    backend->graphExecute(graph, ins, outs);  // warmup
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < runs; ++i) backend->graphExecute(graph, ins, outs);
+    const auto t1 = std::chrono::steady_clock::now();
+    total_ms += std::chrono::duration<double, std::milli>(t1 - t0).count() / runs;
+    total_macs += (double)Hq * M * N * K;
+  }
+  const double gflops_s = 2.0 * total_macs / (total_ms * 1.0e-3) / 1.0e9;
+  fprintf(stderr,
+          "[BLKSEL-PERQB %-10s] Hq=%d Lr=%d SD=%d num_qb=%d BQr=%d -> per-layer SUM avg=%9.4f ms (%d dispatches) %8.2f "
+          "GFLOP/s\n",
+          tag.c_str(), Hq, Lr, SD, num_qb, BQr, total_ms, num_qb - 1, gflops_s);
+}
+
+// ---------------------------------------------------------------------------
 // W4A16: per-channel int4 static weight × fp16 activation. "Naive" path — no
 // block scaling, just one fp32 scale per output channel.
 //
@@ -346,6 +460,21 @@ TEST_F(GemmLatencyTest, Qwen17B_Attn_DecodeCtx2048_QK) { runAttnQK(backend_, 16,
 TEST_F(GemmLatencyTest, Qwen17B_Attn_DecodeCtx2048_AV) { runAttnAV(backend_, 16, 1, 2048, 128, "1p7B_dec2048_av"); }
 TEST_F(GemmLatencyTest, Qwen17B_Attn_DecodeCtx4096_QK) { runAttnQK(backend_, 16, 1, 4096, 128, "1p7B_dec4096_qk"); }
 TEST_F(GemmLatencyTest, Qwen17B_Attn_DecodeCtx4096_AV) { runAttnAV(backend_, 16, 1, 4096, 128, "1p7B_dec4096_av"); }
+
+// ===========================================================================
+// XAttention block-selection score core (matmul+softmax) at the model's
+// Hq=16, d=128, stride S=8 (SD = S*d = 1024), Lr = L/S. Compare against the
+// ARM CPU / Adreno GPU numbers in docs/qnn_backend/block_selection.md.
+// ===========================================================================
+TEST_F(GemmLatencyTest, BlockSelScore_S8_L256)  { runBlockSelectScore(backend_, 16,  32, 1024, "s8_L256"); }
+TEST_F(GemmLatencyTest, BlockSelScore_S8_L512)  { runBlockSelectScore(backend_, 16,  64, 1024, "s8_L512"); }
+TEST_F(GemmLatencyTest, BlockSelScore_S8_L1024) { runBlockSelectScore(backend_, 16, 128, 1024, "s8_L1024"); }
+TEST_F(GemmLatencyTest, BlockSelScore_S8_L2048) { runBlockSelectScore(backend_, 16, 256, 1024, "s8_L2048"); }
+TEST_F(GemmLatencyTest, BlockSelScore_S8_L4096) { runBlockSelectScore(backend_, 16, 512, 1024, "s8_L4096"); }
+
+// Per-qb granularity (num_qb separate dispatches/layer) vs the big-batch above.
+TEST_F(GemmLatencyTest, BlockSelScorePerQb_S8_L1024) { runBlockSelectScorePerQb(backend_, 16, 128, 1024, "s8_L1024"); }
+TEST_F(GemmLatencyTest, BlockSelScorePerQb_S8_L2048) { runBlockSelectScorePerQb(backend_, 16, 256, 1024, "s8_L2048"); }
 
 // ===========================================================================
 // Square sweep — roofline reference, plus an upper bound on what the HMX

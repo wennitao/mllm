@@ -46,13 +46,41 @@ MLLM_MAIN({
   auto& config_path = Argparse::add<std::string>("-c|--config").help("Model config json").required(true);
   auto& sq_arg = Argparse::add<int>("--sq").help("Compiled Sq (must match the .bin's --sq)").def(1024);
   auto& gen_arg = Argparse::add<int>("--gen").help("Number of tokens to generate via decode-by-reprefill").def(0);
+  auto& params_arg = Argparse::add<std::string>("--params")
+                         .help("Path to ptq_lpbq .mllm — enables XAttention score-based block selection")
+                         .def("");
 
   Argparse::parse(argc, argv);
   if (help.isSet()) { Argparse::printHelp(); return 0; }
 
-  mllm::initQnnBackend(model_path.get());
-
   auto qwen3_cfg = mllm::models::qwen3::Qwen3Config(config_path.get());
+
+  // Extract per-layer Q zero-points for XAttention score-based block selection
+  // BEFORE initQnnBackend, so the 2.4 GB .mllm is freed before the QNN context
+  // (~1.6 GB) + PD reservation load — avoids the memory spike.
+  std::vector<int32_t> q_zp;
+  std::vector<float> q_scale, k_scale;
+  if (!params_arg.get().empty()) {
+    auto params = mllm::load(params_arg.get(), mllm::ModelFileVersion::kV2);
+    const int L = qwen3_cfg.num_hidden_layers;
+    q_zp.reserve(L); q_scale.reserve(L); k_scale.reserve(L);
+    for (int i = 0; i < L; ++i) {
+      std::string p = "model.layers." + std::to_string(i) + ".self_attn.";
+      std::string qzp = p + "q_rope_add_0_output_qdq.fake_quant.zero_point";
+      std::string qsc = p + "q_rope_add_0_output_qdq.fake_quant.scale";
+      std::string ksc = p + "k_cast_to_int8_qdq.fake_quant.scale";
+      if (!params->has(qzp) || !params->has(qsc) || !params->has(ksc)) {
+        fmt::print("⚠️  missing qdq params for layer {} — score-based selection NOT enabled\n", i);
+        q_zp.clear(); q_scale.clear(); k_scale.clear();
+        break;
+      }
+      q_zp.push_back(params->pull(qzp).item<int32_t>());
+      q_scale.push_back(params->pull(qsc).item<float>());
+      k_scale.push_back(params->pull(ksc).item<float>());
+    }
+  }  // `params` freed here
+
+  mllm::initQnnBackend(model_path.get());
 
   QnnAOTConfig config;
   config.num_layers          = qwen3_cfg.num_hidden_layers;
@@ -88,6 +116,11 @@ MLLM_MAIN({
 
   ShaBlockSparsePromptProcessorSplit proc(&kv, config, Sq);
   proc.init_io();
+
+  if (!q_zp.empty()) {
+    proc.enableScoreBasedSelection(q_zp, q_scale, k_scale);
+    fmt::print("✅ XAttention score-based block selection enabled ({} layers)\n", q_zp.size());
+  }
 
   auto prefill_start = std::chrono::high_resolution_clock::now();
   int64_t first_token = proc.prefill(prompt_tokens, /*start_pos=*/0);
