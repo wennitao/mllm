@@ -988,3 +988,22 @@ doc's split no-score points: Sq256≈147 ms, Sq512≈256 ms, Sq1024≈530 ms.
 
 KNOWN cosmetic issue: aux context isn't freed at shutdown → "free device failed:
 context still associated" at exit (harmless; fix = free aux_context_ in dtor).
+
+### CPU-side scorer tuning: de-transpose & softmax (2026-05-20)
+
+Looked into the two CPU costs in the NPU-score path (matmul itself is ~17 ms NPU).
+- **kc de-transpose (~22 ms warm) is NOT the bottleneck.** An A/B (sequential-
+  read loop order vs naive d-innermost) showed no difference — both ~22 ms warm,
+  ~80 ms on the cold first prefill. The 33–193 ms "variance" seen earlier was
+  cold-start / CPU-frequency ramp (first prefill after launch), not cache access.
+  Kept the simple loop.
+- **Softmax+pool: fused + skip-max → ~30 → ~20 ms warm.** Fused the exp and the
+  block-pool into one pass over histr (no prob[] scratch: per kb-block, exp+sum
+  straight into the block partial-sum + row total; then scores += bsum/total),
+  and skipped the max-subtraction for the NPU path (pre-scaled logits are O(1-10)
+  → no float-exp overflow). Retrieval unchanged (8090293).
+
+Warm steady-state (single prefill, Sq=1024, S=8): kc ~22 ms, matmul ~17 ms,
+softmax+pool ~20 ms → **scoring ~59 ms, prefill ~569 ms (1799 tok/s)** — ~90 ms
+over the 478 ms no-score floor, ~1.5× faster than dense. (Decode-by-reprefill
+inflates the first prefill via cold-start; warm prefills are ~569–600 ms.)

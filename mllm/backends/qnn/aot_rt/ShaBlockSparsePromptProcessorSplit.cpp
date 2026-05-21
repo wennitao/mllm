@@ -338,7 +338,9 @@ bool ShaBlockSparsePromptProcessorSplit::computeLayerLogits(int layer) {
       }
       // kc NATURAL [Hh,Lrn,SDn]: kc[h,rg,s*D+d] = K_cache[(hbase+h)/g,d,rg*Sn+s]-128.
       // (Runtime MatMul transpose_in1=true does the transpose, so kc isn't
-      // pre-transposed — same packed layout as qr.)
+      // pre-transposed — same packed layout as qr.) ~22 ms warm; the larger
+      // variance seen at first is cold-start / CPU-frequency ramp, not this loop
+      // (an A/B with a sequential-read order made no difference).
       {
         const uint8_t* pk = kv_manager_->getKCache()[layer].buffer;
         mllm_fp16_t* kd = score_kc_.ptr<mllm_fp16_t>();
@@ -519,27 +521,37 @@ bool ShaBlockSparsePromptProcessorSplit::computeBlockScores(int layer, int qb_gl
   // temp-scaled → softmax with temp=1. CPU paths apply the full temp here.
   const float temp = npu_score_ ? 1.0f : (q_scale_[layer] * k_scale_[layer] / (std::sqrt((float)D) * (float)S));
 
-  // Per head: history-only softmax + block-pool.
+  // Per head: history-only softmax + block-pool. The exp and the block-pool are
+  // FUSED into one pass over histr (no prob[] scratch): per kb-block, exp+sum
+  // its BKr logits straight into the block partial-sum, accumulating the row
+  // total in parallel; then scores += block_sum/total. For the NPU path the
+  // logits are pre-scaled to O(1-10), so the max-subtraction (needed only for
+  // exp overflow) is skipped — one fewer pass over histr.
   const auto t_sm0 = clk::now();
   scores.assign((size_t)Hq * qb_global, 0.0f);
+  const bool need_max = !npu_score_;
 #pragma omp parallel for schedule(static)
   for (int h = 0; h < Hq; ++h) {
-    std::vector<float> prob(histr);
+    std::vector<float> bsum(qb_global);
     const float* lh = lg + (size_t)h * lg_head_stride;
     float* sc = scores.data() + (size_t)h * qb_global;
     for (int r = 0; r < BQr; ++r) {
       const float* row = lh + (size_t)r * lg_row_stride;
-      float mx = -std::numeric_limits<float>::infinity();
-      for (int k = 0; k < histr; ++k) mx = std::max(mx, row[k] * temp);
-      float sum = 0.0f;
-      for (int k = 0; k < histr; ++k) { prob[k] = fast_exp(row[k] * temp - mx); sum += prob[k]; }
-      const float inv = sum > 0.0f ? 1.0f / sum : 0.0f;
-      for (int kb = 0; kb < qb_global; ++kb) {
-        float m = 0.0f;
-        const float* pk = prob.data() + (size_t)kb * BKr;
-        for (int k = 0; k < BKr; ++k) m += pk[k];
-        sc[kb] += m * inv;
+      float mx = 0.0f;
+      if (need_max) {
+        mx = -std::numeric_limits<float>::infinity();
+        for (int k = 0; k < histr; ++k) mx = std::max(mx, row[k] * temp);
       }
+      float sum = 0.0f;
+      for (int kb = 0; kb < qb_global; ++kb) {
+        const float* pk = row + (size_t)kb * BKr;
+        float m = 0.0f;
+        for (int k = 0; k < BKr; ++k) m += fast_exp(pk[k] * temp - mx);
+        bsum[kb] = m;
+        sum += m;
+      }
+      const float inv = sum > 0.0f ? 1.0f / sum : 0.0f;
+      for (int kb = 0; kb < qb_global; ++kb) sc[kb] += bsum[kb] * inv;
     }
   }
   score_sm_us_ += us_since(t_sm0);
