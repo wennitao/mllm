@@ -275,6 +275,12 @@ MLLM_MAIN({
     setenv("ADSP_LIBRARY_PATH", ".:/data/local/tmp", /*overwrite=*/1);
   }
 
+  // Disable QNN's DETAILED profiling. Each graph would otherwise allocate a
+  // profile buffer on the NSP; across a long shape sweep these accumulate
+  // and starve later graphExecute calls (err 6001 / "Failed to map
+  // profiling buffer on NSP").
+  setenv("MLLM_QNN_PROFILE_OFF", "1", /*overwrite=*/1);
+
   // Initialize QNN online (no context file -- pass a guaranteed-absent
   // path so initQnnBackend takes the "fresh context" branch even if some
   // stale qnn_context.bin from an AOT run is sitting in CWD).
@@ -295,14 +301,13 @@ MLLM_MAIN({
   std::printf("[npu-attn-bench] fp16 / qti.aisw decomposed (MatMul + EWMul + EWAdd + Softmax + MatMul)\n");
   std::printf("[npu-attn-bench] H=%d D=%d  warmup=%d iters=%d\n\n", kH, kD, kWarmup, kIters);
 
-  // ---- Prefill: S_kv fixed = 128, S_q varies. Causal mask on. ----
-  std::printf("[mode=prefill]  S_kv fixed = 128, S_q varies\n");
+  // ---- Prefill: square attention, S_q = S_kv = N. Causal mask on. ----
+  std::printf("[mode=prefill]  S_q = S_kv = N\n");
   {
-    constexpr int kS_kv = 128;
-    const int s_q_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 1024, 2048};
+    const int n_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 1024, 2048, 4096};
     int idx = 0;
-    for (int s_q : s_q_sizes) {
-      Shape sh{kH, s_q, kS_kv, kD, /*causal=*/true, "prefill"};
+    for (int n : n_sizes) {
+      Shape sh{kH, n, n, kD, /*causal=*/true, "prefill"};
       announce(sh);
       bench_one(backend, sh, kWarmup, kIters, idx++);
     }
@@ -313,7 +318,7 @@ MLLM_MAIN({
   std::printf("\n[mode=decode]   S_q fixed = 1, S_kv varies\n");
   {
     constexpr int kS_q = 1;
-    const int s_kv_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048};
+    const int s_kv_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
     int idx = 1000;  // distinct from prefill so graph names never collide
     for (int s_kv : s_kv_sizes) {
       Shape sh{kH, kS_q, s_kv, kD, /*causal=*/false, "decode"};

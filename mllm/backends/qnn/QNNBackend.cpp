@@ -116,6 +116,14 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
 
   QnnLog_Level_t qnnLogLevel = QNN_LOG_LEVEL_ERROR;  // default QNN log level
   profilingLevel_ = ProfilingLevel::DETAILED;
+  // MLLM_QNN_PROFILE_OFF=1 disables QNN profiling.
+  // Why: DETAILED profiling allocates per-graph profile buffers on the NSP
+  // and they accumulate; building many graphs in one process (e.g. a shape
+  // sweep) exhausts NSP memory and subsequent graphExecute calls silently
+  // fail with err 6001. Also produces a lot of stderr noise no caller parses.
+  if (const char* p = std::getenv("MLLM_QNN_PROFILE_OFF"); p && *p != '\0' && *p != '0') {
+    profilingLevel_ = ProfilingLevel::OFF;
+  }
   debug_ = false;  // when set true, NATIVE tensor will be regared as APP_READ tensor
 
   // Load QNN libraries and hold handles for lifecycle management

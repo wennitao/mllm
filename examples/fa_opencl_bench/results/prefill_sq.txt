@@ -1,13 +1,16 @@
 [device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=1024
 [kernel] flash_attention_fp32 D=128 Br=4  local_mem=18720 B  max_wg_size=1024
+note: S=4096 omitted from prefill -- single FA kernel launch at that shape
+      trips the Adreno GPU watchdog (TDR) at ~13 s and the OS SIGKILLs the
+      process. NPU and CPU benches include 4096.
 
-seq         B=1 H=16 D=128  S_q=    2 S_kv=  128  min=   0.854 ms  med=   0.916 ms  mean=   0.990 ms      1.2 GF/s     2.5 GB/s
-seq         B=1 H=16 D=128  S_q=    4 S_kv=  128  min=   0.941 ms  med=   1.269 ms  mean=   1.194 ms      2.2 GF/s     2.3 GB/s
-seq         B=1 H=16 D=128  S_q=    8 S_kv=  128  min=   1.227 ms  med=   1.287 ms  mean=   1.315 ms      3.4 GF/s     1.8 GB/s
-seq         B=1 H=16 D=128  S_q=   16 S_kv=  128  min=   2.186 ms  med=   2.395 ms  mean=   2.393 ms      3.9 GF/s     1.1 GB/s
-seq         B=1 H=16 D=128  S_q=   32 S_kv=  128  min=   3.760 ms  med=   4.005 ms  mean=   4.007 ms      4.5 GF/s     0.7 GB/s
-seq         B=1 H=16 D=128  S_q=   64 S_kv=  128  min=   6.920 ms  med=   7.186 ms  mean=   7.175 ms      4.9 GF/s     0.5 GB/s
-seq         B=1 H=16 D=128  S_q=  128 S_kv=  128  min=  12.580 ms  med=  12.779 ms  mean=  12.774 ms      5.4 GF/s     0.3 GB/s
-seq         B=1 H=16 D=128  S_q=  256 S_kv=  128  min=  23.224 ms  med=  23.402 ms  mean=  23.412 ms      5.8 GF/s     0.3 GB/s
-seq         B=1 H=16 D=128  S_q= 1024 S_kv=  128  min=  86.730 ms  med=  86.972 ms  mean=  86.952 ms      6.2 GF/s     0.2 GB/s
-seq         B=1 H=16 D=128  S_q= 2048 S_kv=  128  min= 171.566 ms  med= 171.760 ms  mean= 171.719 ms      6.3 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q=    2 S_kv=    2  min=   0.288 ms  med=   0.338 ms  mean=   0.354 ms      0.1 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q=    4 S_kv=    4  min=   0.297 ms  med=   0.352 ms  mean=   0.381 ms      0.3 GF/s     0.4 GB/s
+prefill     B=1 H=16 D=128  S_q=    8 S_kv=    8  min=   0.332 ms  med=   0.609 ms  mean=   0.556 ms      0.9 GF/s     0.8 GB/s
+prefill     B=1 H=16 D=128  S_q=   16 S_kv=   16  min=   0.443 ms  med=   0.560 ms  mean=   0.637 ms      2.5 GF/s     1.2 GB/s
+prefill     B=1 H=16 D=128  S_q=   32 S_kv=   32  min=   0.997 ms  med=   1.055 ms  mean=   1.066 ms      4.3 GF/s     1.1 GB/s
+prefill     B=1 H=16 D=128  S_q=   64 S_kv=   64  min=   3.491 ms  med=   3.701 ms  mean=   3.719 ms      4.9 GF/s     0.6 GB/s
+prefill     B=1 H=16 D=128  S_q=  128 S_kv=  128  min=  12.569 ms  med=  12.795 ms  mean=  12.793 ms      5.4 GF/s     0.3 GB/s
+prefill     B=1 H=16 D=128  S_q=  256 S_kv=  256  min=  48.753 ms  med=  49.057 ms  mean=  49.035 ms      5.5 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q= 1024 S_kv= 1024  min= 801.087 ms  med= 804.597 ms  mean= 804.318 ms      5.4 GF/s     0.0 GB/s
+prefill     B=1 H=16 D=128  S_q= 2048 S_kv= 2048  min=3282.083 ms  med=3292.556 ms  mean=3292.215 ms      5.2 GF/s     0.0 GB/s

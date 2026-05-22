@@ -200,12 +200,15 @@ MLLM_MAIN({
   print_kernel_local_mem(runtime.get(), kD, kBr);
   std::printf("\n");
 
-  std::printf("\n[mode=prefill]  S_kv fixed = 128, S_q varies\n");
+  std::printf("\n[mode=prefill]  S_q = S_kv = N\n");
   {
-    constexpr int kS_kv = 128;
-    const int s_q_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 1024, 2048};
-    for (int s_q : s_q_sizes) {
-      Shape sh{kB, kH, s_q, kS_kv, kD, "prefill"};
+    // Skip N=4096 here: a single FA kernel launch at that shape runs for
+    // ~13 s on Adreno 830, which trips the GPU watchdog (TDR) and the OS
+    // SIGKILLs the process. NPU and CPU benches include 4096; OpenCL
+    // cannot without splitting the kernel launch.
+    const int n_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 1024, 2048};
+    for (int n : n_sizes) {
+      Shape sh{kB, kH, n, n, kD, "prefill"};
       announce(sh);
       bench_one(sh, kWarmup, kIters);
     }
@@ -214,7 +217,7 @@ MLLM_MAIN({
   std::printf("\n[mode=decode]   S_q fixed = 1, S_kv varies\n");
   {
     constexpr int kS_q = 1;
-    const int s_kv_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048};
+    const int s_kv_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
     for (int s_kv : s_kv_sizes) {
       Shape sh{kB, kH, kS_q, s_kv, kD, "decode"};
       announce(sh);
