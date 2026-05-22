@@ -1,0 +1,11 @@
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    2  min=   2.814 ms  med=   2.824 ms  mean=   2.824 ms      0.0 GF/s     0.0 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    4  min=   2.684 ms  med=   2.816 ms  mean=   2.810 ms      0.0 GF/s     0.0 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    8  min=   2.818 ms  med=   2.833 ms  mean=   2.833 ms      0.0 GF/s     0.0 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   16  min=   2.811 ms  med=   2.835 ms  mean=   2.834 ms      0.0 GF/s     0.0 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   32  min=   2.750 ms  med=   2.832 ms  mean=   2.827 ms      0.1 GF/s     0.1 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   64  min=   2.819 ms  med=   2.834 ms  mean=   2.835 ms      0.2 GF/s     0.2 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  128  min=   2.732 ms  med=   2.849 ms  mean=   2.843 ms      0.4 GF/s     0.4 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  256  min=   2.857 ms  med=   2.886 ms  mean=   2.885 ms      0.7 GF/s     0.7 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  512  min=   2.994 ms  med=   3.126 ms  mean=   3.116 ms      1.4 GF/s     1.4 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 1024  min=   3.314 ms  med=   3.325 ms  mean=   3.325 ms      2.5 GF/s     2.5 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 2048  min=   3.498 ms  med=   3.513 ms  mean=   3.514 ms      4.8 GF/s     4.8 GB/s

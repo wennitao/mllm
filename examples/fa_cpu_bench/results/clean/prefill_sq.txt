@@ -1,0 +1,10 @@
+prefill     B=1 H=16 D=128  S_q=    2 S_kv=  128  min=   0.492 ms  med=   0.492 ms  mean=   0.503 ms      2.1 GF/s     4.3 GB/s
+prefill     B=1 H=16 D=128  S_q=    4 S_kv=  128  min=   0.509 ms  med=   0.976 ms  mean=   0.863 ms      4.2 GF/s     4.3 GB/s
+prefill     B=1 H=16 D=128  S_q=    8 S_kv=  128  min=   1.001 ms  med=   1.001 ms  mean=   1.009 ms      4.2 GF/s     2.2 GB/s
+prefill     B=1 H=16 D=128  S_q=   16 S_kv=  128  min=   1.940 ms  med=   1.947 ms  mean=   1.957 ms      4.4 GF/s     1.2 GB/s
+prefill     B=1 H=16 D=128  S_q=   32 S_kv=  128  min=   3.619 ms  med=   3.639 ms  mean=   3.648 ms      4.7 GF/s     0.7 GB/s
+prefill     B=1 H=16 D=128  S_q=   64 S_kv=  128  min=   6.222 ms  med=   6.265 ms  mean=   6.261 ms      5.4 GF/s     0.5 GB/s
+prefill     B=1 H=16 D=128  S_q=  128 S_kv=  128  min=   7.147 ms  med=   7.202 ms  mean=   7.251 ms      9.5 GF/s     0.6 GB/s
+prefill     B=1 H=16 D=128  S_q=  256 S_kv=  128  min=   7.196 ms  med=   7.233 ms  mean=   7.232 ms     18.8 GF/s     0.9 GB/s
+prefill     B=1 H=16 D=128  S_q= 1024 S_kv=  128  min=   8.273 ms  med=   8.347 ms  mean=   8.348 ms     65.4 GF/s     2.3 GB/s
+prefill     B=1 H=16 D=128  S_q= 2048 S_kv=  128  min=   9.680 ms  med=   9.824 ms  mean=   9.841 ms    111.8 GF/s     3.7 GB/s

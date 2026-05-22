@@ -9,9 +9,12 @@ add_subdirectory(qwen3)
 add_subdirectory(qwen3_service)
 add_subdirectory(qwen3_moe)
 add_subdirectory(deepseek_ocr)
+add_subdirectory(fa_opencl_bench)
+add_subdirectory(fa_cpu_bench)
 
 if(MLLM_BUILD_QNN_BACKEND)
   add_subdirectory(qwen_npu)
+  add_subdirectory(attn_npu_bench)
 endif()
 
 if(MLLM_TRACY_ENABLE)

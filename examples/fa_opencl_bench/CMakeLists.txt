@@ -1,0 +1,5 @@
+if(MLLM_BUILD_OPENCL_BACKEND)
+  add_executable(mllm-fa-opencl-bench main.cpp)
+  target_link_libraries(mllm-fa-opencl-bench PRIVATE MllmRT MllmCPUBackend MllmOpenCLBackend)
+  target_include_directories(mllm-fa-opencl-bench PRIVATE ${MLLM_INCLUDE_DIR})
+endif()
