@@ -223,8 +223,12 @@ TEST_F per Sq (e.g., `Sq1024_TopK8`, `BigBatch_Sq1024_TopK8`,
 ## Per-op profile: what actually dominates inside the graph
 
 Set `MLLM_QNN_PROFILE=DETAILED` to dump a `qnn_profile.csv` with per-op
-cycle counts. At Sq=512 on the steady-state warmed dispatch (totals
-9.95 M cycles dense / 7.69 M cycles big-batch sparse):
+cycle counts. (For the general, reproducible recipe — the csv schema, the
+aggregation one-liner, and the fact that this works on AOT-loaded context
+bins with no schematic — see [per_op_profiling.md](per_op_profiling.md); the
+schematic-gated per-hardware-unit view is the separate workflow below.) At
+Sq=512 on the steady-state warmed dispatch (totals 9.95 M cycles dense /
+7.69 M cycles big-batch sparse):
 
 | Op | Dense cycles | Dense % | Sparse cycles | Sparse % | Note |
 |---|---:|---:|---:|---:|---|

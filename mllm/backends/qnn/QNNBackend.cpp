@@ -116,7 +116,17 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
                QNNParamOpFactory, QNNSiLUOpFactory, QNNEmbeddingOpFactory>();
 
   QnnLog_Level_t qnnLogLevel = QNN_LOG_LEVEL_ERROR;  // default QNN log level
+  // Per-op profiling is opt-in via the environment so the in-process qnn_profile.csv
+  // (per-QNN-op NODE cycle counts) can be obtained without recompiling. DETAILED also
+  // enables QNN's richer event set; BASIC gives coarse graph-level timings.
   profilingLevel_ = ProfilingLevel::OFF;
+  if (const char* prof = std::getenv("MLLM_QNN_PROFILE")) {
+    if (std::string(prof) == "DETAILED") {
+      profilingLevel_ = ProfilingLevel::DETAILED;
+    } else if (std::string(prof) == "BASIC") {
+      profilingLevel_ = ProfilingLevel::BASIC;
+    }
+  }
   debug_ = false;  // when set true, NATIVE tensor will be regared as APP_READ tensor
 
   // Load QNN libraries and hold handles for lifecycle management
@@ -886,6 +896,17 @@ void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>&
                                                qnn_outputs.size(), runtime_->profileHandle, nullptr));
 
   if (ProfilingLevel::OFF != profilingLevel_) { extractBackendProfilingInfo(runtime_->profileHandle); }
+}
+
+void QNNBackend::resetGraphIOForRebind(const std::string& graphName) {
+  auto it = qnnModelIndexMap_.find(graphName);
+  if (it == qnnModelIndexMap_.end()) {
+    MLLM_ERROR("Graph {} not found for rebind reset", graphName);
+    return;
+  }
+  auto model = qnnModels_[it->second];
+  for (auto& w : model->getGraphInputTensorWrappers()) w->resetForRebind();
+  for (auto& w : model->getGraphOutputTensorWrappers()) w->resetForRebind();
 }
 
 bool QNNBackend::addTensor(const std::string& graphName, const std::string& tensorName, Qnn_TensorType_t type,
