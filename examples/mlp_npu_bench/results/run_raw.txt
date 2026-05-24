@@ -1,0 +1,15 @@
+device: Snapdragon SM8750 (Hexagon V79), QAIRT 2.44.0.260225
+bench:  fp16 / qti.aisw  (gate_proj/up_proj/down_proj = MatMul, silu = Sigmoid+EWMul, mul = ElementWiseMultiply)
+model:  Qwen3-1.7B   hidden=2048   intermediate=6144
+shape:  decode (S=1)
+config: warmup=3 iters=20
+note:   qti.aisw has no native SiLU. SiLU is built as Sigmoid + ElementWiseMultiply
+        in one graph, so its time covers both ops (this is what a real fused SiLU
+        would do internally).
+
+[mlp-npu-bench] fp16 / qti.aisw (MatMul + SiLU + EWMul)
+[mlp-npu-bench] model=Qwen3-1.7B  hidden=2048  intermediate=6144  warmup=3 iters=20
+
+>> mlp        S=    1 hidden=2048 intermediate=6144 ...
+mlp         S=    1  gate=   0.370  silu=   0.053  up=   0.374  mul=   0.041  down=   0.372  total=   1.210 ms (min)
+                    gate=   67.9  silu=  0.1   up=   67.3  mul=  0.2   down=   67.7 GF/s

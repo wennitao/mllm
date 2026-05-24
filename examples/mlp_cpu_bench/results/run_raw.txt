@@ -1,0 +1,12 @@
+device: Snapdragon SM8750 (8 CPU threads via OpenMP)
+bench:  fp32 / mllm::cpu::CPULinearOp + CPUSiLUOp + CPUMulOp (impl_type=kDefault)
+model:  Qwen3-1.7B   hidden=2048   intermediate=6144
+shape:  decode (S=1)
+config: warmup=3 iters=20
+
+[mlp-cpu-bench] fp32 / mllm::cpu::CPULinearOp + CPUSiLUOp + CPUMulOp (impl_type=kDefault)
+[mlp-cpu-bench] model=Qwen3-1.7B  hidden=2048  intermediate=6144  threads=8  warmup=3 iters=20
+
+>> mlp        S=    1 hidden=2048 intermediate=6144 ...
+mlp         S=    1  gate=   0.843  silu=   0.003  up=   0.854  mul=   0.001  down=   0.832  total=   2.533 ms (min)
+                    gate=   29.8  silu=  2.0   up=   29.5  mul=  9.8   down=   30.3 GF/s

@@ -1,0 +1,7 @@
+op         shape_input      shape_weight  shape_output  min_ms  med_ms   mean_ms  gflops  notes
+gate_proj  1x2048           6144x2048     1x6144        0.8292  1.0216   1.4125    17.8  CPULinearOp Y=X@W^T fp32 impl=kDefault (BLAS)  [tail-heavy: mean >> min]
+silu       1x6144           -             1x6144        0.0031  0.0031   0.0031     2.0  CPUSiLUOp fp32 (Y = x * sigmoid(x))
+up_proj    1x2048           6144x2048     1x6144        0.8282  0.8329   0.8396    30.0  CPULinearOp Y=X@W^T fp32 impl=kDefault (BLAS)
+mul        1x6144 + 1x6144  -             1x6144        0.0006  0.0006   0.0006     9.5  CPUMulOp fp32
+down_proj  1x6144           2048x6144     1x2048        0.7918  0.7948   0.8163    30.8  CPULinearOp Y=X@W^T fp32 impl=kDefault (BLAS)
+TOTAL      -                -             -             2.4529  2.6530   3.0722    -     sum of per-op times; gflops computed off mean_ms
