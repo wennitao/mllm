@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fmt/core.h>
 #include <mllm/mllm.hpp>
-#include <mllm/models/qwen3/modeling_qwen3.hpp>
+#include <mllm/models/qwen3/modeling_qwen3_fa2.hpp>
 #include <mllm/models/qwen3/tokenization_qwen3.hpp>
 #include <mllm/utils/AnyValue.hpp>
 
@@ -14,6 +14,8 @@ MLLM_MAIN({
   auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer_path").help("Tokenizer directory").required(true);
   auto& config_path = Argparse::add<std::string>("-c|--config_path").help("Config path").required(true);
   auto& perf_path = Argparse::add<std::string>("--perf_path").help("Perfetto trace output path").def("qwen3.perf");
+  auto& max_new_tokens = Argparse::add<int>("--max_new_tokens").help("Cap decode steps (<=0 = unlimited)").def(-1);
+  auto& seq_len = Argparse::add<int>("--seq_len").help("If >0, use synthetic prefill of exactly N tokens (bypass tokenizer/template)").def(-1);
 
   Argparse::parse(argc, argv);
 
@@ -56,12 +58,31 @@ MLLM_MAIN({
 
     try {
       fmt::print("🔄 Processing...\n");
-      auto inputs = qwen3_tokenizer.convertMessage({.prompt = prompt_text});
+      mllm::models::ARGenerationOutputPast inputs;
+      int sl = seq_len.get();
+      if (sl > 0) {
+        // Synthetic prefill of exactly N tokens (avoid chat-template overhead).
+        auto seq = mllm::Tensor::empty({1, sl}, mllm::kInt64, mllm::kCPU).alloc();
+        auto* p = seq.ptr<int64_t>();
+        for (int i = 0; i < sl; ++i) p[i] = 100;  // arbitrary safe text token
+        inputs = {{"sequence", seq}};
+        fmt::print("(synthetic input: {} tokens)\n", sl);
+      } else {
+        inputs = qwen3_tokenizer.convertMessage({.prompt = prompt_text});
+      }
 
       fmt::print("\n🤖 Response: ");
 
       // Use for loop
-      for (auto& step : qwen3.chat(inputs)) { std::wcout << qwen3_tokenizer.detokenize(step.cur_token_id) << std::flush; }
+      int decode_count = 0;
+      int cap = max_new_tokens.get();
+      for (auto& step : qwen3.chat(inputs)) {
+        std::wcout << qwen3_tokenizer.detokenize(step.cur_token_id) << std::flush;
+        if (cap > 0 && ++decode_count >= cap) {
+          qwen3.decodeEventEndTimePoint();
+          break;
+        }
+      }
 
       fmt::print("\n{}\n", std::string(60, '-'));
     } catch (const std::exception& e) { fmt::print("\n❌ Error: {}\n{}\n", e.what(), std::string(60, '-')); }

@@ -39,11 +39,16 @@ MLLM_MAIN({
   auto& qnn_env_path = Argparse::add<std::string>("-qnn_env|--qnn_env_path")
                            .def(defaultQnnEnvPath())
                            .help("QNN AOT Environment path.");
+  auto& ar_len_arg     = Argparse::add<int>("--ar_len").def(32).help("Prefill chunk size (N) baked into the graph.");
+  auto& context_len_arg = Argparse::add<int>("--context_len").def(1024).help("Max KV cache length (CL) baked into the graph.");
+  auto& output_path = Argparse::add<std::string>("-o|--output")
+                          .def("qwen3-1.7B-lpbq-sha.bin")
+                          .help("Output .bin path for the compiled QNN context.");
 
   Argparse::parse(argc, argv);
 
-  int N = 32;
-  int CL = 1024;
+  int N  = ar_len_arg.get();
+  int CL = context_len_arg.get();
 
   if (help.isSet()) {
     Argparse::printHelp();
@@ -134,7 +139,7 @@ MLLM_MAIN({
       // clang-format on
     }
 
-    mllm::print("Tracing SHA model (seq=32)...");
+    mllm::print(fmt::format("Tracing SHA model (seq={})...", N));
     auto ir = model.trace(trace_inputs, {});
     mllm::print("SHA model traced successfully.");
 
@@ -142,7 +147,7 @@ MLLM_MAIN({
     pm.reg(mllm::qnn::aot::createQnnAOTLoweringPipeline(&qnn_aot_env, qnn_aot_cfg_files.get(), params));
     pm.run();
 
-    mllm::redirect("qwen3_qnn_aot_sha_32.mir", [&]() { mllm::print(ir["model"]); });
+    mllm::redirect(fmt::format("qwen3_qnn_aot_sha_{}.mir", N), [&]() { mllm::print(ir["model"]); });
   }
 
   // Model length 1.
@@ -196,11 +201,13 @@ MLLM_MAIN({
     mllm::redirect("qwen3_qnn_aot_sha_1.mir", [&]() { mllm::print(ir["model"]); });
   }
 
-  qnn_aot_env.saveContext("context.0", "qwen3-1.7B-lpbq-sha.bin");
+  qnn_aot_env.saveContext("context.0", output_path.get());
 
   mllm::print("SHA compilation completed successfully!");
+  mllm::print(fmt::format("  ar_len (prefill chunk) = {}", ar_len_arg.get()));
+  mllm::print(fmt::format("  context_len            = {}", CL));
   mllm::print("Output files:");
-  mllm::print("  - qwen3_qnn_aot_sha_32.mir (IR dump for seq=32)");
-  mllm::print("  - qwen3_qnn_aot_sha_1.mir (IR dump for seq=1)");
-  mllm::print("  - qwen3-1.7B-lpbq-sha.bin (QNN context)");
+  mllm::print(fmt::format("  - qwen3_qnn_aot_sha_{}.mir (IR dump for prefill)", ar_len_arg.get()));
+  mllm::print("  - qwen3_qnn_aot_sha_1.mir (IR dump for decode)");
+  mllm::print(fmt::format("  - {} (QNN context)", output_path.get()));
 });
