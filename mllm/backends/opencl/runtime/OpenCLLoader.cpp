@@ -79,6 +79,7 @@ bool OpenCLLoader::tryingToLoadOpenCLDynLibAndParseSymbols(const std::string& li
   LOAD_FUNCTION_PTR(clReleaseKernel);
   LOAD_FUNCTION_PTR(clCreateProgramWithSource);
   LOAD_FUNCTION_PTR(clCreateBuffer);
+  LOAD_FUNCTION_PTR(clCreateBufferWithProperties);
   LOAD_FUNCTION_PTR(clCreateSubBuffer);
   LOAD_FUNCTION_PTR(clCreateImage2D);
   LOAD_FUNCTION_PTR(clRetainKernel);

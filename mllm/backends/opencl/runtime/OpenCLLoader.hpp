@@ -102,6 +102,10 @@ class OpenCLLoader {
   using clCreateKernel_f_t = cl_kernel(CL_API_CALL*)(cl_program, const char*, cl_int*);
   using clRetainKernel_f_t = cl_int(CL_API_CALL*)(cl_kernel kernel);
   using clCreateBuffer_f_t = cl_mem(CL_API_CALL*)(cl_context, cl_mem_flags, size_t, void*, cl_int*);
+  // OpenCL 3.0 / cl_khr_external_memory_dma_buf: needed to import a dmabuf fd
+  // (e.g. QNN rpcmem) as a zero-copy cl_mem via property list.
+  using clCreateBufferWithProperties_f_t = cl_mem(CL_API_CALL*)(cl_context, const cl_mem_properties*, cl_mem_flags, size_t,
+                                                                void*, cl_int*);
   using clCreateSubBuffer_f_t = cl_mem(CL_API_CALL*)(cl_mem buffer, cl_mem_flags flags,
                                                      cl_buffer_create_type buffer_create_type, const void* buffer_create_info,
                                                      cl_int* errcode_ret);
@@ -166,6 +170,7 @@ class OpenCLLoader {
   DEFINE_FUNC_PTR_MEMBER(clReleaseKernel);
   DEFINE_FUNC_PTR_MEMBER(clCreateProgramWithSource);
   DEFINE_FUNC_PTR_MEMBER(clCreateBuffer);
+  DEFINE_FUNC_PTR_MEMBER(clCreateBufferWithProperties);
   DEFINE_FUNC_PTR_MEMBER(clCreateSubBuffer);
   DEFINE_FUNC_PTR_MEMBER(clCreateImage2D);
   DEFINE_FUNC_PTR_MEMBER(clRetainKernel);

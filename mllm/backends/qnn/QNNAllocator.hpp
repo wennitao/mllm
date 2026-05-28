@@ -101,6 +101,16 @@ class QNNAllocator final : public Allocator {
 
   void deRegisterQnnTensorFromSharedBuffer(void* ptr);
 
+  // Surface the underlying ION (dmabuf) file descriptor for an rpcmem-allocated
+  // pointer — needed to alias the same physical pages from OpenCL via the
+  // cl_qcom_ion_host_ptr extension (true zero-copy host↔GPU sharing on Adreno,
+  // analog of CUDA pinned memory but stronger: no DMA staging buffer). Returns
+  // -1 if `ptr` was not allocated by this allocator.
+  int getIonFd(void* ptr) {
+    if (!qnnMemPtrSet_.count(ptr)) return -1;
+    return rpcmem_to_fd(ptr);
+  }
+
  private:
   QNN_INTERFACE_VER_TYPE qnnInterface_;
   Qnn_ContextHandle_t context_ = nullptr;

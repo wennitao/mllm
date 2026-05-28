@@ -5,6 +5,14 @@
 #include "mllm/backends/opencl/runtime/OpenCLLoader.hpp"
 #include "mllm/utils/Log.hpp"
 
+// Khronos cl_khr_external_memory_dma_buf constants. The older Qualcomm-
+// specific cl_qcom_ion_host_ptr was removed from Adreno 8xx — the KHR
+// extension is the supported path. rpcmem fds ARE dmabuf-compatible, so we
+// can import them directly via clCreateBufferWithProperties.
+#ifndef CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR
+#define CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR  0x2067
+#endif
+
 namespace mllm::opencl {
 
 OpenCLAllocator::OpenCLAllocator(std::shared_ptr<OpenCLRuntime> runtime) : runtime_(std::move(runtime)) {}
@@ -95,5 +103,39 @@ size_t OpenCLAllocator::allocSize(Storage* storage) {
 size_t OpenCLAllocator::allocSize(const Storage::ptr_t& storage) { return allocSize(storage.get()); }
 
 size_t OpenCLAllocator::alignSize() const { return 64; }
+
+cl_mem OpenCLAllocator::createIonAlias(int ion_fd, void* hostptr, size_t size, cl_uint host_cache_policy) {
+  (void)host_cache_policy;   // KHR external_memory_dma_buf has no cache policy knob;
+                              // Adreno's iocoherent extension handles coherency in HW.
+  if (ion_fd < 0 || size == 0) {
+    MLLM_ERROR("OpenCLAllocator::createIonAlias bad args fd={} ptr={} size={}", ion_fd, hostptr, size);
+    return nullptr;
+  }
+
+  // Khronos external-memory dmabuf path. rpcmem fds ARE dmabuf-compatible
+  // (rpcmem is built on dmabuf on modern Android). The properties list keys
+  // the import handle type (DMA_BUF_KHR) and value (the fd). No size padding
+  // requirement here — the KHR extension uses the dmabuf's own size.
+  cl_mem_properties props[] = {
+      (cl_mem_properties)CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR,
+      (cl_mem_properties)ion_fd,
+      (cl_mem_properties)0,
+  };
+
+  cl_int err = 0;
+  cl_mem buf = OpenCLLoader::instance().clCreateBufferWithProperties(
+      runtime_->context()(),
+      props,
+      CL_MEM_READ_WRITE,
+      size,
+      nullptr,
+      &err);
+  if (err != CL_SUCCESS || buf == nullptr) {
+    MLLM_ERROR("OpenCLAllocator::createIonAlias clCreateBufferWithProperties failed: err={} fd={} size={}",
+               err, ion_fd, size);
+    return nullptr;
+  }
+  return buf;
+}
 
 }  // namespace mllm::opencl
