@@ -39,6 +39,13 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   add_executable(mllm-qwen3-aot-sha-blocksparse-causal-split-c compile_sha_blocksparse_causal_split.cpp)
   target_link_libraries(mllm-qwen3-aot-sha-blocksparse-causal-split-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-aot-sha-blocksparse-causal-split-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  # Fake-scale w4a16-LPBQ attention-projection microbench compiler — same
+  # synthetic-params pattern as the MLP microbench, for q/k/v/o_proj. Feeds
+  # tools/het_sim/qwen3_1p7b_block.py with measured LPBQ projection costs.
+  add_executable(mllm-qwen3-aot-attn-lpbq-microbench-c compile_attn_lpbq_microbench.cpp)
+  target_link_libraries(mllm-qwen3-aot-attn-lpbq-microbench-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-qwen3-aot-attn-lpbq-microbench-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)
@@ -62,3 +69,14 @@ target_include_directories(mllm-qwen3-aot-sha-blocksparse-runner PRIVATE ${MLLM_
 add_executable(mllm-qwen3-aot-sha-blocksparse-split-runner aot_run_sha_blocksparse_causal_split.cpp)
 target_link_libraries(mllm-qwen3-aot-sha-blocksparse-split-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-aot-sha-blocksparse-split-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+# Driver for the fake-scale w4a16-LPBQ attention-projection microbench bins.
+add_executable(mllm-qwen3-aot-attn-lpbq-bench aot_bench_attn_lpbq.cpp)
+target_link_libraries(mllm-qwen3-aot-attn-lpbq-bench PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-aot-attn-lpbq-bench PRIVATE ${MLLM_INCLUDE_DIR})
+
+# Driver for the split (pre_attn + post_attn) all-NPU baseline bin — the
+# apples-to-apples measurement that anchors tools/het_sim/qwen3_1p7b_block.py.
+add_executable(mllm-qwen3-aot-block-split-bench aot_bench_block_split.cpp)
+target_link_libraries(mllm-qwen3-aot-block-split-bench PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-aot-block-split-bench PRIVATE ${MLLM_INCLUDE_DIR})
