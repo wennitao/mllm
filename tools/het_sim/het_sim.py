@@ -507,8 +507,35 @@ def simulate_block(spec, Sq, T, assignment,
     timeline_free = {tl: 0.0 for tl in set(e2t.values())}
     timeline_busy = {tl: 0.0 for tl in timeline_free}
 
-    is_mlp_fused = (op_engine["silu"] == "NPU" and op_engine["gateup_mul"] == "NPU")
-    fused_mlp_per_tile = _interp_table(spec["fused_mlp_npu_ms"], Sq) if is_mlp_fused else None
+    # Detect active VTCM-fusion chains. A chain is "active" if every op in it
+    # is pinned to NPU. Larger chains win over smaller (overlapping) ones —
+    # production NPU compilers fuse as deeply as the engine assignment allows.
+    # When a chain is active, the FIRST op gets the fused-chain latency and
+    # the rest get 0; dependency edges are preserved so ordering stays right.
+    chains = spec.get("fusion_chains", [])
+    active_chains = []
+    ops_in_active = set()
+    for chain in chains:
+        if any(op in ops_in_active for op in chain["ops"]):
+            continue  # overlaps with an already-active larger chain
+        if all(op_engine.get(op) == "NPU" for op in chain["ops"]):
+            lat_ms = _interp_table(spec[chain["lookup"]], Sq)
+            if "correction_key" in chain:
+                # Bandwidth-bound additive correction (e.g. q/k_norm+rope on top
+                # of the measured pre-attn split bin which skipped them).
+                lat_ms += spec[chain["correction_key"]] * Sq / 1024.0
+            active_chains.append({"chain": chain, "lat_ms": lat_ms})
+            for op in chain["ops"]:
+                ops_in_active.add(op)
+
+    # Map op -> (chain_info, is_first_op) for quick lookup in the build loop.
+    op_in_chain = {}
+    for ac in active_chains:
+        first_op = ac["chain"]["ops"][0]
+        for op in ac["chain"]["ops"]:
+            op_in_chain[op] = (ac, op == first_op)
+
+    is_mlp_fused = any("gr" in ac["chain"]["ops"] for ac in active_chains)
 
     def lat(op, engine):
         x = block_latency_ms(spec, op, engine, Sq, gqa_ms_per_tile=gqa_ms_per_tile)
@@ -546,17 +573,14 @@ def simulate_block(spec, Sq, T, assignment,
                     deps_events.append(pe)
             out_bytes = sum(spec["output_bytes_per_token"][o] * Sq
                             for o in info["outputs"])
-            # MLP-fused special case: when silu+gateup_mul are both NPU, we
-            # collapse the gr→silu→gateup→dn chain to one event using the
-            # measured fused MLP latency. Implemented by: gr inherits the
-            # fused cost, dn becomes 0; silu/gateup_mul become 0. (The chain
-            # already serializes on NPU, so total = fused number, correct.)
+            # VTCM-fusion: if this op belongs to an active fusion chain, the
+            # FIRST op of the chain absorbs the measured fused-chain latency
+            # and the rest are zero-cost (the chain runs as one dispatch).
+            # Dependency edges are still wired so cross-engine deps work.
             this_lat = lat(op, engine)
-            if is_mlp_fused:
-                if op == "gr":
-                    this_lat = fused_mlp_per_tile
-                elif op in ("silu", "gateup_mul", "dn"):
-                    this_lat = 0.0
+            if op in op_in_chain:
+                ac, is_first = op_in_chain[op]
+                this_lat = ac["lat_ms"] if is_first else 0.0
             ev = Event(tile=tile, op=op, engine=engine, deps=deps_events,
                        latency=this_lat, output_bytes=out_bytes,
                        timeline=e2t[engine])

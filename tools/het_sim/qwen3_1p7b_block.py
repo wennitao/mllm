@@ -208,4 +208,57 @@ SPEC = {
     # fast path in the QNN LPBQ kernel (~3.2 ms at Sq=1024 vs ~9 ms real). Use
     # real weights when refreshing this table.
     "fused_mlp_npu_ms": {64: 1.09, 128: 1.09, 256: 2.32, 512: 2.77, 1024: 9.23},
+
+    # Larger-scope fusion lookups for VTCM-resident chains the production NPU
+    # graph compiler builds. These supersede per-op summation when ALL ops in
+    # the chain are pinned to NPU — eliminates the inter-op DRAM round-trips
+    # the per-op rate model implicitly assumes. Measured via the `split` mode
+    # of mllm-qwen3-aot-attn-lpbq-microbench-c (pre_attn + post_attn bins,
+    # real PTQ params) plus an estimated +1.12 ms / 1024 tokens for per-head
+    # q/k_norm + RoPE which our split bin skipped (production uses per-head
+    # Conv2D form; bench measures multi-head — these two ops are bandwidth-
+    # bound so estimate is reasonable).
+    "fused_pre_attn_npu_ms": {  # in_norm + qkv + q/k_norm + q/k_rope
+        64:   0.81,
+        128:  1.10,
+        256:  2.11,
+        512:  3.88,
+        1024: 8.14,  # NB: this is pre+post+correction. Set up below to be just pre+correction.
+    },
+    # Actually: fused_pre_attn = pre_only_measured + qknorm_rope_correction
+    # See fusion_chains below. Replaced with separate pre / post tables:
+    "_fused_pre_only_ms":  {64: 0.19, 128: 0.28, 256: 0.47, 512: 0.80, 1024: 1.58},
+    "_fused_post_only_ms": {64: 0.52, 128: 0.70, 256: 1.38, 512: 2.51, 1024: 5.47},
+    # qknorm+rope estimate: bandwidth-bound, scales linearly with Sq.
+    # At Sq=1024: q/k_norm 0.27 ms (NPU 43.8 GB/s) + q/k_rope 0.85 ms (NPU 9.9 GB/s) = 1.12 ms.
+    "_qknorm_rope_ms_per_1024": 1.12,
+
+    # Fusion chains. Each chain lists the ops that fuse into a single
+    # VTCM-resident dispatch on NPU. The simulator detects when ALL ops in a
+    # chain are pinned to NPU and replaces their summed per-op latency with
+    # the measured fused lookup (analog of the existing fused_mlp_npu_ms
+    # special case, now generalized).
+    #
+    # Chains are tried LARGEST first — a longer chain subsumes shorter ones
+    # whose ops it overlaps with.
+    "fusion_chains": [
+        {
+            "name": "all_npu_pre_attn",
+            "ops": ["in_norm", "q_proj", "k_proj", "v_proj",
+                    "q_norm", "k_norm", "q_rope", "k_rope"],
+            "lookup": "_fused_pre_only_ms",
+            "correction_key": "_qknorm_rope_ms_per_1024",  # add bandwidth-derived q/k_norm+rope
+        },
+        {
+            "name": "all_npu_post_attn",
+            "ops": ["o_proj", "res1", "post_norm",
+                    "gr", "silu", "gateup_mul", "dn", "res2"],
+            "lookup": "_fused_post_only_ms",
+        },
+        {
+            "name": "fused_mlp_only",  # fallback when norm/add are off-NPU
+            "ops": ["gr", "silu", "gateup_mul", "dn"],
+            "lookup": "fused_mlp_npu_ms",
+        },
+    ],
 }
