@@ -23,9 +23,10 @@ class OpenCLLinearOp final : public aops::LinearOp {
   // lpbq_prepack_combined_scales). The cl_mem buffers are owned by the caller.
   void setLPBQ(cl_mem w_ushort, cl_mem combined_scales, int K, int N, int Bs);
   bool lpbqEnabled() const { return lpbq_enabled_; }
-  // Execute the LPBQ matmul on fp16 buffers: input [M,K] -> output [M,N].
-  // Used by forward() and by the op-level correctness test.
-  void runLPBQ(cl_mem input_fp16, cl_mem output_fp16, int M);
+  // Execute the LPBQ matmul: input [M,K] -> output [M,N]. io_fp32=false treats
+  // the buffers as fp16 (kernel-native); io_fp32=true treats them as fp32 (the
+  // model's activation dtype) and converts to/from fp16 around the kernels.
+  void runLPBQ(cl_mem input, cl_mem output, int M, bool io_fp32 = false);
 
  private:
   std::shared_ptr<KernelWrap> kernel_fp32_transb_bias_ = nullptr;
@@ -39,7 +40,10 @@ class OpenCLLinearOp final : public aops::LinearOp {
   // LPBQ tuned kernels (built only when the device supports fp16).
   std::shared_ptr<KernelWrap> kernel_lpbq_gemm_v5_ = nullptr;
   std::shared_ptr<KernelWrap> kernel_lpbq_gemv_v5_ = nullptr;
-  std::shared_ptr<KernelWrap> kernel_lpbq_transpose_ = nullptr;
+  std::shared_ptr<KernelWrap> kernel_lpbq_transpose_ = nullptr;        // fp16 [M,K]->[K,M]
+  std::shared_ptr<KernelWrap> kernel_lpbq_transpose_f32_ = nullptr;    // fp32 [M,K]->fp16 [K,M]
+  std::shared_ptr<KernelWrap> kernel_lpbq_cvt_f32_f16_ = nullptr;
+  std::shared_ptr<KernelWrap> kernel_lpbq_cvt_f16_f32_ = nullptr;
   bool lpbq_enabled_ = false;
   cl_mem lpbq_w_ushort_ = nullptr;
   cl_mem lpbq_scales_ = nullptr;

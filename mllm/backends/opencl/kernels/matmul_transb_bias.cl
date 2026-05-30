@@ -881,4 +881,23 @@ __kernel void lpbq_gemv_fp16_v5(
   }
   if (tid == 0) dst[n] = (half)partial[0];
 }
+
+// fp32<->fp16 helpers for the LPBQ path: the model runs fp32 activations but
+// the LPBQ kernels are fp16. transpose+downcast for the prefill image; plain
+// copies for the gemv input and both outputs.
+__kernel void lpbq_transpose_mk_to_km_f32(__global const float* src,
+                                          __global half* dst,
+                                          const int M, const int K) {
+  const int m = get_global_id(0);
+  const int k = get_global_id(1);
+  if (m < M && k < K) dst[(long)k * M + m] = (half)src[(long)m * K + k];
+}
+__kernel void lpbq_cvt_f32_f16(__global const float* src, __global half* dst, const int n) {
+  const int i = get_global_id(0);
+  if (i < n) dst[i] = (half)src[i];
+}
+__kernel void lpbq_cvt_f16_f32(__global const half* src, __global float* dst, const int n) {
+  const int i = get_global_id(0);
+  if (i < n) dst[i] = (float)src[i];
+}
 #endif // SUPPORTS_FP16

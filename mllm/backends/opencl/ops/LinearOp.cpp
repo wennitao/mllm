@@ -36,6 +36,12 @@ OpenCLLinearOp::OpenCLLinearOp(const aops::LinearOpOptions& options) : LinearOp(
     MLLM_RT_ASSERT(kernel_lpbq_gemv_v5_);
     kernel_lpbq_transpose_ = runtime->buildKernel(program_name, "lpbq_transpose_mk_to_km_f16", buildOptions);
     MLLM_RT_ASSERT(kernel_lpbq_transpose_);
+    kernel_lpbq_transpose_f32_ = runtime->buildKernel(program_name, "lpbq_transpose_mk_to_km_f32", buildOptions);
+    MLLM_RT_ASSERT(kernel_lpbq_transpose_f32_);
+    kernel_lpbq_cvt_f32_f16_ = runtime->buildKernel(program_name, "lpbq_cvt_f32_f16", buildOptions);
+    MLLM_RT_ASSERT(kernel_lpbq_cvt_f32_f16_);
+    kernel_lpbq_cvt_f16_f32_ = runtime->buildKernel(program_name, "lpbq_cvt_f16_f32", buildOptions);
+    MLLM_RT_ASSERT(kernel_lpbq_cvt_f16_f32_);
   }
 }
 
@@ -49,79 +55,106 @@ void OpenCLLinearOp::setLPBQ(cl_mem w_ushort, cl_mem combined_scales, int K, int
   lpbq_enabled_ = true;
 }
 
-void OpenCLLinearOp::runLPBQ(cl_mem input_fp16, cl_mem output_fp16, int M) {
+void OpenCLLinearOp::runLPBQ(cl_mem input, cl_mem output, int M, bool io_fp32) {
   MLLM_RT_ASSERT(lpbq_enabled_);
   auto runtime = std::static_pointer_cast<OpenCLBackend>(Context::instance().getBackend(kOpenCL))->runtime();
   const int K = lpbq_K_, N = lpbq_N_;
-  cl_int ret = CL_SUCCESS;
+  auto& cq = runtime->commandQueue();
+  cl_context ctx = runtime->context()();
+  cl_int err = CL_SUCCESS, ret = CL_SUCCESS;
+
+  // The LPBQ kernels are fp16. When the model hands us fp32 buffers (io_fp32),
+  // run through fp16 scratch: convert input -> fp16, kernel -> fp16 scratch,
+  // convert -> fp32 output. in16/out16 are what the kernels actually touch.
+  cl_mem in16 = input, out16 = output;
+  cl_mem in16_scratch = nullptr, out16_scratch = nullptr, km = nullptr, acts_img = nullptr;
+  if (io_fp32) {
+    out16_scratch = OpenCLLoader::instance().clCreateBuffer(ctx, CL_MEM_READ_WRITE, (size_t)M * N * 2, nullptr, &err);
+    if (err != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ out16 alloc failed: {}", err); }
+    out16 = out16_scratch;
+    if (M == 1) {  // gemv reads the plain [K] activation; downcast it to fp16.
+      in16_scratch = OpenCLLoader::instance().clCreateBuffer(ctx, CL_MEM_READ_WRITE, (size_t)K * 2, nullptr, &err);
+      if (err != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ in16 alloc failed: {}", err); }
+      auto kc = kernel_lpbq_cvt_f32_f16_->get();
+      cl_uint a = 0;
+      kc.setArg(a++, sizeof(cl_mem), &input);
+      kc.setArg(a++, sizeof(cl_mem), &in16_scratch);
+      kc.setArg(a++, sizeof(int), &K);
+      cq.enqueueNDRangeKernel(kc, cl::NullRange, cl::NDRange((size_t)K), cl::NullRange);
+      in16 = in16_scratch;
+    }
+  }
 
   if (M == 1) {
-    // Decode GEMV: activation is the plain [K] fp16 buffer (no transpose).
+    // Decode GEMV.
     auto k = kernel_lpbq_gemv_v5_->get();
     cl_uint a = 0;
-    ret |= k.setArg(a++, sizeof(cl_mem), &input_fp16);
+    ret |= k.setArg(a++, sizeof(cl_mem), &in16);
     ret |= k.setArg(a++, sizeof(cl_mem), &lpbq_w_ushort_);
     ret |= k.setArg(a++, sizeof(cl_mem), &lpbq_scales_);
-    ret |= k.setArg(a++, sizeof(cl_mem), &output_fp16);
+    ret |= k.setArg(a++, sizeof(cl_mem), &out16);
     ret |= k.setArg(a++, sizeof(int), &N);
     ret |= k.setArg(a++, sizeof(int), &K);
     if (ret != CL_SUCCESS) { MLLM_ERROR("LPBQ gemv setArg failed: {}", ret); }
     const int lws = 128;
-    auto err = runtime->commandQueue().enqueueNDRangeKernel(
-        k, cl::NullRange, cl::NDRange((size_t)N * lws), cl::NDRange(lws));
-    if (err != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ gemv failed: {}", err); }
-    return;
+    auto e = cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange((size_t)N * lws), cl::NDRange(lws));
+    if (e != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ gemv failed: {}", e); }
+  } else {
+    // Prefill GEMM: transpose acts -> [K,M] fp16 scratch (downcast if io_fp32),
+    // wrap as a half image1d_buffer, dispatch the coalesced v5 GEMM.
+    km = OpenCLLoader::instance().clCreateBuffer(ctx, CL_MEM_READ_WRITE, (size_t)M * K * 2, nullptr, &err);
+    if (err != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ km alloc failed: {}", err); }
+    {
+      auto kt = (io_fp32 ? kernel_lpbq_transpose_f32_ : kernel_lpbq_transpose_)->get();
+      cl_uint a = 0;
+      ret |= kt.setArg(a++, sizeof(cl_mem), &input);  // fp32 (io_fp32) or fp16
+      ret |= kt.setArg(a++, sizeof(cl_mem), &km);
+      ret |= kt.setArg(a++, sizeof(int), &M);
+      ret |= kt.setArg(a++, sizeof(int), &K);
+      if (ret != CL_SUCCESS) { MLLM_ERROR("LPBQ transpose setArg failed: {}", ret); }
+      auto e = cq.enqueueNDRangeKernel(kt, cl::NullRange, cl::NDRange((size_t)M, (size_t)K), cl::NullRange);
+      if (e != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ transpose failed: {}", e); }
+    }
+    cl_image_format img_fmt = {CL_RGBA, CL_HALF_FLOAT};
+    cl_image_desc img_desc = {};
+    img_desc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
+    img_desc.image_width = (size_t)M * K / 4;
+    img_desc.buffer = km;
+    acts_img = OpenCLLoader::instance().clCreateImage(ctx, CL_MEM_READ_ONLY, &img_fmt, &img_desc, nullptr, &err);
+    if (err != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ acts image failed: {}", err); }
+    {
+      auto kg = kernel_lpbq_gemm_v5_->get();
+      cl_uint a = 0;
+      ret |= kg.setArg(a++, sizeof(cl_mem), &acts_img);
+      ret |= kg.setArg(a++, sizeof(cl_mem), &lpbq_w_ushort_);
+      ret |= kg.setArg(a++, sizeof(cl_mem), &lpbq_scales_);
+      ret |= kg.setArg(a++, sizeof(cl_mem), &out16);
+      ret |= kg.setArg(a++, sizeof(int), &M);
+      ret |= kg.setArg(a++, sizeof(int), &N);
+      ret |= kg.setArg(a++, sizeof(int), &K);
+      if (ret != CL_SUCCESS) { MLLM_ERROR("LPBQ gemm setArg failed: {}", ret); }
+      cl::NDRange global((size_t)M / 8, (size_t)N / 4);
+      cl::NDRange local(8, 16);
+      auto e = cq.enqueueNDRangeKernel(kg, cl::NullRange, global, local);
+      if (e != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ gemm failed: {}", e); }
+    }
   }
 
-  // Prefill GEMM. (1) transpose acts [M,K] -> [K,M] half scratch buffer;
-  // (2) wrap it as a half image1d_buffer; (3) dispatch the coalesced v5 GEMM.
-  cl_context ctx = runtime->context()();
-  cl_int err2 = CL_SUCCESS;
-  cl_mem km = OpenCLLoader::instance().clCreateBuffer(
-      ctx, CL_MEM_READ_WRITE, (size_t)M * K * sizeof(uint16_t), nullptr, &err2);
-  if (err2 != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ km alloc failed: {}", err2); }
-
-  {
-    auto kt = kernel_lpbq_transpose_->get();
+  if (io_fp32) {  // fp16 scratch output -> fp32 model output.
+    auto kc = kernel_lpbq_cvt_f16_f32_->get();
+    int total = M * N;
     cl_uint a = 0;
-    ret |= kt.setArg(a++, sizeof(cl_mem), &input_fp16);
-    ret |= kt.setArg(a++, sizeof(cl_mem), &km);
-    ret |= kt.setArg(a++, sizeof(int), &M);
-    ret |= kt.setArg(a++, sizeof(int), &K);
-    if (ret != CL_SUCCESS) { MLLM_ERROR("LPBQ transpose setArg failed: {}", ret); }
-    auto e = runtime->commandQueue().enqueueNDRangeKernel(
-        kt, cl::NullRange, cl::NDRange((size_t)M, (size_t)K), cl::NullRange);
-    if (e != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ transpose failed: {}", e); }
+    kc.setArg(a++, sizeof(cl_mem), &out16);
+    kc.setArg(a++, sizeof(cl_mem), &output);
+    kc.setArg(a++, sizeof(int), &total);
+    cq.enqueueNDRangeKernel(kc, cl::NullRange, cl::NDRange((size_t)M * N), cl::NullRange);
   }
 
-  cl_image_format img_fmt = {CL_RGBA, CL_HALF_FLOAT};
-  cl_image_desc img_desc = {};
-  img_desc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
-  img_desc.image_width = (size_t)M * K / 4;
-  img_desc.buffer = km;
-  cl_mem acts_img = OpenCLLoader::instance().clCreateImage(ctx, CL_MEM_READ_ONLY, &img_fmt, &img_desc, nullptr, &err2);
-  if (err2 != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ acts image failed: {}", err2); }
-
-  {
-    auto kg = kernel_lpbq_gemm_v5_->get();
-    cl_uint a = 0;
-    ret |= kg.setArg(a++, sizeof(cl_mem), &acts_img);
-    ret |= kg.setArg(a++, sizeof(cl_mem), &lpbq_w_ushort_);
-    ret |= kg.setArg(a++, sizeof(cl_mem), &lpbq_scales_);
-    ret |= kg.setArg(a++, sizeof(cl_mem), &output_fp16);
-    ret |= kg.setArg(a++, sizeof(int), &M);
-    ret |= kg.setArg(a++, sizeof(int), &N);
-    ret |= kg.setArg(a++, sizeof(int), &K);
-    if (ret != CL_SUCCESS) { MLLM_ERROR("LPBQ gemm setArg failed: {}", ret); }
-    cl::NDRange global((size_t)M / 8, (size_t)N / 4);
-    cl::NDRange local(8, 16);
-    auto e = runtime->commandQueue().enqueueNDRangeKernel(kg, cl::NullRange, global, local);
-    if (e != CL_SUCCESS) { MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "LPBQ gemm failed: {}", e); }
-  }
-
-  runtime->commandQueue().finish();
-  OpenCLLoader::instance().clReleaseMemObject(acts_img);
-  OpenCLLoader::instance().clReleaseMemObject(km);
+  cq.finish();
+  if (acts_img) OpenCLLoader::instance().clReleaseMemObject(acts_img);
+  if (km) OpenCLLoader::instance().clReleaseMemObject(km);
+  if (out16_scratch) OpenCLLoader::instance().clReleaseMemObject(out16_scratch);
+  if (in16_scratch) OpenCLLoader::instance().clReleaseMemObject(in16_scratch);
 }
 
 void OpenCLLinearOp::forward(const std::vector<Tensor>& inputs, std::vector<Tensor>& outputs) {
@@ -158,7 +191,7 @@ void OpenCLLinearOp::forward(const std::vector<Tensor>& inputs, std::vector<Tens
   // fp16 activations [M,K] and writes fp16 [M,N]. Non-breaking otherwise.
   if (lpbq_enabled_) {
     MLLM_RT_ASSERT(batch_count == 1);
-    runLPBQ(cl_buffer_input, cl_buffer_output, M);
+    runLPBQ(cl_buffer_input, cl_buffer_output, M, input.dtype() == DataTypes::kFloat32);
     return;
   }
 
