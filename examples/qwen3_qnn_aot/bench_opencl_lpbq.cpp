@@ -705,6 +705,50 @@ __kernel void lpbq_gemm_fp16_v5(
   WRITE_M(4); WRITE_M(5); WRITE_M(6); WRITE_M(7);
   #undef WRITE_M
 }
+
+// ============================================================================
+// v6 GEMV (decode, Sq=1) — bandwidth-optimal for the ushort [K/4,N/4,4] layout.
+// Each output channel n is split across GEMV_KSPLIT threads (the g-axis) for
+// occupancy; the 64 threads on the n-axis read ADJACENT ushorts at each kg
+//   weights[kg*N + n]
+// → fully COALESCED, each int4 weight read exactly once (no one-nibble-per-byte
+// bloat like v1). Thread (n,g) sums its contiguous K-chunk; the GEMV_KSPLIT
+// partials per channel are reduced in local memory. Activation broadcasts from
+// L1; combined fp16 scale reloaded once per 16-K block.
+#define GEMV_KSPLIT 8
+__kernel void lpbq_gemv_fp16_v6(
+    __global const half*   act,      // [K] fp16
+    __global const ushort*  weights,  // [K/4, N/4, 4] == [K/4 * N] ushort
+    __global const half*   scales,   // [num_blocks, N/4, 4] == [num_blocks * N] half
+    __global       half*   dst,      // [N] fp16
+    const int N, const int K) {
+  const int n  = get_global_id(0);     // output channel
+  const int g  = get_global_id(1);     // K-split index 0..GEMV_KSPLIT-1
+  const int ln = get_local_id(0);      // 0..63
+  const int K_4 = K >> 2;
+  const int chunk = K_4 / GEMV_KSPLIT; // K-groups per split (K%32==0 ⇒ exact)
+  const int kg0 = g * chunk, kg1 = kg0 + chunk;
+
+  float acc = 0.0f, s = 0.0f;
+  for (int kg = kg0; kg < kg1; ++kg) {
+    if ((kg & 3) == 0 || kg == kg0) s = (float)scales[(long)(kg >> 2) * N + n];
+    ushort w = weights[(long)kg * N + n];
+    half4 a = vload4(0, act + (kg << 2));
+    acc += (float)a.s0 * ((float)((int)(w        & 0x000F) - 8) * s);
+    acc += (float)a.s1 * ((float)((int)((w >>  4) & 0x000F) - 8) * s);
+    acc += (float)a.s2 * ((float)((int)((w >>  8) & 0x000F) - 8) * s);
+    acc += (float)a.s3 * ((float)((int)((w >> 12) & 0x000F) - 8) * s);
+  }
+  __local float part[64 * GEMV_KSPLIT];
+  part[ln * GEMV_KSPLIT + g] = acc;
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if (g == 0 && n < N) {
+    float sum = 0.0f;
+    #pragma unroll
+    for (int gg = 0; gg < GEMV_KSPLIT; ++gg) sum += part[ln * GEMV_KSPLIT + gg];
+    dst[n] = (half)sum;
+  }
+}
 )CL";
 
 struct LPBQTensor {
@@ -769,12 +813,16 @@ MLLM_MAIN({
   auto& projs_arg = Argparse::add<std::string>("--projs")
                         .help("comma list").def("q,k,v,o,gate,up,down");
   auto& ver_arg = Argparse::add<int>("--ver").help("prefill GEMM kernel: 4 or 5").def(5);
+  auto& batched_arg = Argparse::add<bool>("--batched").help("batch all reps, one clFinish (hides launch floor)");
+  auto& gemv6_arg = Argparse::add<bool>("--gemv6").help("decode: use bandwidth-optimal v6 gemv (ushort layout)");
   Argparse::parse(argc, argv);
   if (help.isSet()) { Argparse::printHelp(); return 0; }
 
   const int Sq = sq_arg.get();
   const int reps = reps_arg.get();
   const int gemm_ver = ver_arg.get();
+  const bool batched = batched_arg.isSet();
+  const bool gemv6 = gemv6_arg.isSet();
   const int L = layer_arg.get();
 
   // Qwen3-1.7B geometry.
@@ -815,6 +863,7 @@ MLLM_MAIN({
   cl_kernel k_gemm_v3 = OpenCLLoader::instance().clCreateKernel(prog, "lpbq_gemm_fp16_v3", &err); CL_CHECK(err);
   cl_kernel k_gemm_v4 = OpenCLLoader::instance().clCreateKernel(prog, "lpbq_gemm_fp16_v4", &err); CL_CHECK(err);
   cl_kernel k_gemm_v5 = OpenCLLoader::instance().clCreateKernel(prog, "lpbq_gemm_fp16_v5", &err); CL_CHECK(err);
+  cl_kernel k_gemv_v6 = OpenCLLoader::instance().clCreateKernel(prog, "lpbq_gemv_fp16_v6", &err); CL_CHECK(err);
 
   struct Spec { const char* tag; std::string prefix; int K; int N; };
   std::string base = "model.layers." + std::to_string(L);
@@ -880,8 +929,22 @@ MLLM_MAIN({
     cl_mem d_C_NM = OpenCLLoader::instance().clCreateBuffer(ctx, CL_MEM_WRITE_ONLY,
                       (size_t)Sq * (size_t)T.N * 2, nullptr, &err); CL_CHECK(err);
 
-    auto run_once = [&]() {
-      if (Sq == 1) {
+    auto run_once = [&](bool do_finish) {
+      if (Sq == 1 && gemv6) {
+        // Bandwidth-optimal v6 gemv on the ushort layout (d_W4) + combined
+        // scales (d_Sc4); output [N] into d_C.
+        int K = T.K, N = T.N;
+        CL_CHECK(OpenCLLoader::instance().clSetKernelArg(k_gemv_v6, 0, sizeof(cl_mem), &d_A));
+        CL_CHECK(OpenCLLoader::instance().clSetKernelArg(k_gemv_v6, 1, sizeof(cl_mem), &d_W4));
+        CL_CHECK(OpenCLLoader::instance().clSetKernelArg(k_gemv_v6, 2, sizeof(cl_mem), &d_Sc4));
+        CL_CHECK(OpenCLLoader::instance().clSetKernelArg(k_gemv_v6, 3, sizeof(cl_mem), &d_C));
+        CL_CHECK(OpenCLLoader::instance().clSetKernelArg(k_gemv_v6, 4, sizeof(int), &N));
+        CL_CHECK(OpenCLLoader::instance().clSetKernelArg(k_gemv_v6, 5, sizeof(int), &K));
+        const size_t KSPLIT = 8;
+        size_t local[2]  = {64, KSPLIT};
+        size_t global[2] = {((size_t)(T.N + 63) / 64) * 64, KSPLIT};
+        CL_CHECK(OpenCLLoader::instance().clEnqueueNDRangeKernel(q, k_gemv_v6, 2, nullptr, global, local, 0, nullptr, nullptr));
+      } else if (Sq == 1) {
         // GEMV path: kept on v1 (per-OC WG with local-mem reduction). The v2
         // GEMV (subgroup-reduce, image1d_buffer acts, ushort weights, fp16
         // combined scales) was correct but slower than v1 on this device —
@@ -923,11 +986,11 @@ MLLM_MAIN({
         size_t local[2]  = {8, 16};      // 128 threads/WG
         CL_CHECK(OpenCLLoader::instance().clEnqueueNDRangeKernel(q, kg, 2, nullptr, global, local, 0, nullptr, nullptr));
       }
-      CL_CHECK(OpenCLLoader::instance().clFinish(q));
+      if (do_finish) CL_CHECK(OpenCLLoader::instance().clFinish(q));
     };
 
     // Warmup + correctness.
-    run_once();
+    run_once(true);
     if (Sq != 1 && gemm_ver == 4) {
       // v4 writes dst in [N, M] layout; transpose back to [M, N] for compare.
       std::vector<__fp16> out_NM((size_t)Sq * (size_t)T.N);
@@ -956,7 +1019,15 @@ MLLM_MAIN({
     fmt::print("    (max_abs={:.3e}  max_ref={:.3e})\n", max_abs, max_ref);
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < reps; ++i) run_once();
+    if (batched) {
+      // Enqueue all reps, one clFinish — hides the per-call launch floor, so
+      // the per-run time reflects steady-state kernel throughput (matches the
+      // way llama.cpp's test-backend-ops measures).
+      for (int i = 0; i < reps; ++i) run_once(false);
+      CL_CHECK(OpenCLLoader::instance().clFinish(q));
+    } else {
+      for (int i = 0; i < reps; ++i) run_once(true);  // per-rep sync (decode-realistic)
+    }
     auto t1 = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / reps;
 
