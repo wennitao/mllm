@@ -1,6 +1,12 @@
 // kernel/matmul_transb_bias.cl
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+#ifdef cl_qcom_reqd_sub_group_size
+#pragma OPENCL EXTENSION cl_qcom_reqd_sub_group_size : enable
+#define LPBQ_REQD_SG __attribute__((qcom_reqd_sub_group_size("full")))
+#else
+#define LPBQ_REQD_SG
+#endif
 #define TILE_SIZE 16
 #define QK4_0 32
 #define QK8_0 32
@@ -773,5 +779,106 @@ gemm_fp16_q4_0_transb_bias(__global const half *A, __global const block_q4_0 *B,
   const long c_idx = (long)batch_idx * M * N + (long)s * N + n;
 
   vstore_half_rte(acc, 0, &C[c_idx]);
+}
+#endif // SUPPORTS_FP16
+
+#if defined(SUPPORTS_FP16)
+// ==================================================================
+// LPBQ (w4a16, two-scale int4) tuned GEMM/GEMV.
+// Ported from the validated bench (bench_opencl_lpbq.cpp v5). Weights are
+// ushort-packed [K/4, N/4, 4] (4 K-nibbles/OC, offset-binary), scales are
+// combined s1*s2 fp16 [num_blocks, N/4, 4]. Activations come from a half
+// image1d_buffer of [K, M] (transpose first via lpbq_transpose_mk_to_km_f16).
+// Output is [M, N] half written COALESCED via vstore4 (the key vs the old
+// scattered [N, M] store) — see commit history for the 1.8x measurement.
+// ==================================================================
+
+// [M,K] half -> [K,M] half (backing store for the activation image1d_buffer).
+__kernel void lpbq_transpose_mk_to_km_f16(__global const half* src,
+                                          __global half* dst,
+                                          const int M, const int K) {
+  const int m = get_global_id(0);
+  const int k = get_global_id(1);
+  if (m < M && k < K) dst[(long)k * M + m] = src[(long)m * K + k];
+}
+
+// Prefill GEMM (M % 8 == 0, N % 4 == 0). 8 tokens x 4 OCs per thread.
+LPBQ_REQD_SG
+__kernel void lpbq_gemm_fp16_v5(
+    __read_only image1d_buffer_t acts,   // [K, M] half (1d image of half4)
+    __global const ushort*       weights, // [K/4, N/4, 4 ushorts]
+    __global const half*         scales,  // [num_blocks, N/4, 4 halves]
+    __global       half*         dst,     // [M, N] half (row = token)
+    const int M, const int N, const int K) {
+  const int gy   = get_global_id(0);
+  const int gx   = get_global_id(1);
+  const int gx_4 = gx << 2;
+  const int M_4  = M >> 2;
+  const int N_4  = N >> 2;
+
+  half8 c0 = (half8)((half)0), c1 = (half8)((half)0);
+  half8 c2 = (half8)((half)0), c3 = (half8)((half)0);
+  half8 B; half4 dq;
+  __global const ushort* w_ptr = weights + gx_4;
+  __global const half*   s_ptr = scales  + gx_4;
+
+  for (int i = 0; i < K; i += 4) {
+    half4 scale  = vload4(0, s_ptr + (long)(i >> 4) * N_4 * 4);
+    ushort4 bits = vload4(0, w_ptr + (long)(i >> 2) * N_4 * 4);
+    #define V5_STEP(KK, MASK, SH) {                                          \
+      B.s0123 = read_imageh(acts, gy*2 + (i+KK)*M_4);                        \
+      B.s4567 = read_imageh(acts, gy*2 + (i+KK)*M_4 + 1);                    \
+      dq.s0 = (((bits.s0 & (MASK)) >> SH) - 8) * scale.s0;                   \
+      dq.s1 = (((bits.s1 & (MASK)) >> SH) - 8) * scale.s1;                   \
+      dq.s2 = (((bits.s2 & (MASK)) >> SH) - 8) * scale.s2;                   \
+      dq.s3 = (((bits.s3 & (MASK)) >> SH) - 8) * scale.s3;                   \
+      c0 += B * dq.s0; c1 += B * dq.s1; c2 += B * dq.s2; c3 += B * dq.s3;    \
+    }
+    V5_STEP(0, 0x000F, 0); V5_STEP(1, 0x00F0, 4);
+    V5_STEP(2, 0x0F00, 8); V5_STEP(3, 0xF000, 12);
+    #undef V5_STEP
+  }
+
+  #define WRITE_M(SM) \
+    vstore4((half4)(c0.s##SM, c1.s##SM, c2.s##SM, c3.s##SM), 0, \
+            dst + (long)((gy << 3) + (SM)) * N + gx_4);
+  WRITE_M(0); WRITE_M(1); WRITE_M(2); WRITE_M(3);
+  WRITE_M(4); WRITE_M(5); WRITE_M(6); WRITE_M(7);
+  #undef WRITE_M
+}
+
+// Decode GEMV (M == 1). One workgroup of LWS threads per output column;
+// threads stride over K and reduce in local memory. Activation is the plain
+// [1, K] = [K] half buffer (no transpose/image needed at M=1).
+__kernel void lpbq_gemv_fp16_v5(
+    __global const half*   act,     // [K] half
+    __global const ushort* weights, // [K/4, N/4, 4]
+    __global const half*   scales,  // [num_blocks, N/4, 4]
+    __global       half*   dst,     // [N] half
+    const int N, const int K) {
+  const int n   = get_group_id(0);    // output column
+  const int tid = get_local_id(0);
+  const int lws = get_local_size(0);
+  const int N_4 = N >> 2;
+  const int ng  = n >> 2;
+  const int il  = n & 3;
+  __local float partial[256];
+
+  float acc = 0.0f;
+  for (int k = tid; k < K; k += lws) {
+    const int kg = k >> 2;
+    const int j  = k & 3;
+    ushort packed = weights[((long)kg * N_4 + ng) * 4 + il];
+    int nib = ((packed >> (j * 4)) & 0x0F) - 8;
+    half sc = scales[((long)(k >> 4) * N_4 + ng) * 4 + il];
+    acc += (float)act[k] * ((float)nib * (float)sc);
+  }
+  partial[tid] = acc;
+  barrier(CLK_LOCAL_MEM_FENCE);
+  for (int s = lws >> 1; s > 0; s >>= 1) {
+    if (tid < s) partial[tid] += partial[tid + s];
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  if (tid == 0) dst[n] = (half)partial[0];
 }
 #endif // SUPPORTS_FP16

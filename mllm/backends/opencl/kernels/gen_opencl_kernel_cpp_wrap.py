@@ -76,6 +76,10 @@ def opencl_codegen():
                         l = l.replace(' < ', '<')
                         l = l.replace(' > ', '>')
                         md5_orig_str += l + "\n"
+                        # Escape embedded double-quotes (e.g. attribute strings
+                        # like qcom_reqd_sub_group_size("full")) so the emitted
+                        # C string literal stays well-formed.
+                        l = l.replace('"', '\\"')
                         l = l + "\\n"
                         opencl_source_map += "\""+l+"\"\n"
                 opencl_source_map += ";\n"
