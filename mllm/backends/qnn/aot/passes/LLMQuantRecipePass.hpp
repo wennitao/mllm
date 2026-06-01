@@ -61,6 +61,69 @@ class LLMQuantRecipeSigmoidPattern : public ir::Pattern {
 };
 
 //===----------------------------------------------------------------------===//
+// Exp Pattern
+//===----------------------------------------------------------------------===//
+class LLMQuantRecipeExpPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeExpPattern> create() { return std::make_shared<LLMQuantRecipeExpPattern>(); }
+};
+
+//===----------------------------------------------------------------------===//
+// Log Pattern
+//===----------------------------------------------------------------------===//
+class LLMQuantRecipeLogPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeLogPattern> create() { return std::make_shared<LLMQuantRecipeLogPattern>(); }
+};
+
+//===----------------------------------------------------------------------===//
+// Rsqrt Pattern
+//===----------------------------------------------------------------------===//
+class LLMQuantRecipeRsqrtPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeRsqrtPattern> create() {
+    return std::make_shared<LLMQuantRecipeRsqrtPattern>();
+  }
+};
+
+//===----------------------------------------------------------------------===//
+// Softplus Pattern
+//===----------------------------------------------------------------------===//
+class LLMQuantRecipeSoftplusPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeSoftplusPattern> create() {
+    return std::make_shared<LLMQuantRecipeSoftplusPattern>();
+  }
+};
+
+class LLMQuantRecipeClipPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeClipPattern> create() {
+    return std::make_shared<LLMQuantRecipeClipPattern>();
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // Negative Pattern
 //===----------------------------------------------------------------------===//
 class LLMQuantRecipeNegPattern : public ir::Pattern {
@@ -321,6 +384,27 @@ class LLMQuantRecipeGatherPattern : public ir::Pattern {
 
   static inline std::shared_ptr<LLMQuantRecipeGatherPattern> create() {
     return std::make_shared<LLMQuantRecipeGatherPattern>();
+  }
+};
+
+// ReduceSum/ReduceMax/Mean (single-in single-out, raw pass-through). Used by the
+// block-sparse score block-pool.
+class LLMQuantRecipeReducePattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+  static inline std::shared_ptr<LLMQuantRecipeReducePattern> create() {
+    return std::make_shared<LLMQuantRecipeReducePattern>();
+  }
+};
+
+// TopK (single-in, two-out: values + indices). Used by in-graph block selection.
+class LLMQuantRecipeTopKPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+  static inline std::shared_ptr<LLMQuantRecipeTopKPattern> create() {
+    return std::make_shared<LLMQuantRecipeTopKPattern>();
   }
 };
 

@@ -361,6 +361,46 @@ bool LLMQuantRecipeSigmoidPattern::rewrite(ir::IRWriter& writer, const ir::op_pt
   return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
 }
 
+bool LLMQuantRecipeExpPattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  if (op->isa_<ir::linalg::ExpOp>()) { return true; }
+  return false;
+}
+bool LLMQuantRecipeExpPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
+}
+
+bool LLMQuantRecipeLogPattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  if (op->isa_<ir::linalg::LogOp>()) { return true; }
+  return false;
+}
+bool LLMQuantRecipeLogPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
+}
+
+bool LLMQuantRecipeRsqrtPattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  if (op->isa_<ir::linalg::RsqrtOp>()) { return true; }
+  return false;
+}
+bool LLMQuantRecipeRsqrtPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
+}
+
+bool LLMQuantRecipeSoftplusPattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  if (op->isa_<ir::linalg::SoftplusOp>()) { return true; }
+  return false;
+}
+bool LLMQuantRecipeSoftplusPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
+}
+
+bool LLMQuantRecipeClipPattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  if (op->isa_<ir::linalg::ClipOp>()) { return true; }
+  return false;
+}
+bool LLMQuantRecipeClipPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
+}
+
 //===----------------------------------------------------------------------===//
 // Negative Pattern
 //===----------------------------------------------------------------------===//
@@ -559,6 +599,47 @@ bool LLMQuantRecipeGatherPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
   op->outputs().front()->setAttr("quant_recipe", quant_spec);
   op->setAttr("quant_recipe", annotation_attr);
 
+  return true;
+}
+
+//===----------------------------------------------------------------------===//
+// Reduce (Sum/Max/Mean) Pattern — single-in single-out raw pass-through.
+//===----------------------------------------------------------------------===//
+bool LLMQuantRecipeReducePattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  return op->isa_<ir::linalg::ReduceSumOp>() || op->isa_<ir::linalg::ReduceMaxOp>() || op->isa_<ir::linalg::MeanOp>();
+}
+
+bool LLMQuantRecipeReducePattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  auto i_0 = *(node->inputs().begin());
+  if (!i_0->getAttr("quant_recipe")) {
+    i_0->setAttr("quant_recipe", genSimpleQuantizationSpecAttr(writer.getContext(), i_0->cast_<ir::tensor::TensorValue>()));
+  }
+  return noSharingSingleInAndSingleOutQuantAnnoAttr(writer.getContext(), node->cast_<ir::linalg::LinalgIROp>());
+}
+
+//===----------------------------------------------------------------------===//
+// TopK Pattern — single-in, two-out (values share input recipe; indices raw int32).
+//===----------------------------------------------------------------------===//
+bool LLMQuantRecipeTopKPattern::isMatch(const mllm::ir::op_ptr_t& op) { return op->isa_<ir::linalg::TopKOp>(); }
+
+bool LLMQuantRecipeTopKPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) {
+  auto i_0 = *(node->inputs().begin());
+  if (!i_0->getAttr("quant_recipe")) {
+    i_0->setAttr("quant_recipe", genSimpleQuantizationSpecAttr(writer.getContext(), i_0->cast_<ir::tensor::TensorValue>()));
+  }
+  auto in_spec = i_0->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>();
+
+  auto vals = *(node->outputs().begin());
+  auto idx = *(std::next(node->outputs().begin()));
+  vals->setAttr("quant_recipe", in_spec);
+  auto idx_spec = genSimpleQuantizationSpecAttr(writer.getContext(), idx->cast_<ir::tensor::TensorValue>());
+  idx->setAttr("quant_recipe", idx_spec);
+
+  auto annotation_attr = writer.create<ir::linalg::LinalgIRQuantizatonAnnotationAttr>();
+  annotation_attr->annotation_.inputs.emplace_back(in_spec->spec_);
+  annotation_attr->annotation_.outputs.emplace_back(in_spec->spec_);
+  annotation_attr->annotation_.outputs.emplace_back(idx_spec->spec_);
+  node->setAttr("quant_recipe", annotation_attr);
   return true;
 }
 
@@ -929,6 +1010,23 @@ bool LLMQuantRecipeLinearPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
       MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir->outputs().front()->isa_<ir::tensor::TensorValue>());
       auto t = weight_reg_tensor_ir->outputs().front()->cast_<ir::tensor::TensorValue>();
       t->setAttr("quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(weight_quant_spec));
+    } else if (use_config["method"] == "FP16") {
+      // Unquantized fp16 FullyConnected: raw fp16 weight + output. Lets a Linear
+      // live inside an otherwise-fp16 graph (e.g. the DeltaNet decode prototype)
+      // without QDQ scaffolding. Weight tensor stays fp16 as loaded.
+      auto raw_w = ir::linalg::QuantizationSpecRaw::create(kFloat16);
+      auto raw_o = ir::linalg::QuantizationSpecRaw::create(kFloat16);
+      linear_ir->outputs().front()->setAttr("quant_recipe",
+                                             writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(raw_o));
+      annotation_attr->annotation_.outputs.emplace_back(raw_o);
+      annotation_attr->annotation_.weights.insert({"weight", raw_w});
+
+      auto weight_name = linear_ir->getAOp()->getName() + ".weight";
+      auto weight_reg_tensor_ir = writer.getContext()->lookupSymbolTable(weight_name);
+      MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir);
+      MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir->outputs().front()->isa_<ir::tensor::TensorValue>());
+      auto t = weight_reg_tensor_ir->outputs().front()->cast_<ir::tensor::TensorValue>();
+      t->setAttr("quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(raw_w));
     } else {
       std::string s = use_config["method"];
       MLLM_WARN("Currently not support method: {}", s);
@@ -1112,6 +1210,11 @@ LLMQuantRecipePass::LLMQuantRecipePass() {
   addPattern(LLMQuantRecipeConv2DPattern::create(), "conv2d", 0);
   addPattern(LLMQuantRecipeSlicePattern::create(), "slice", 0);
   addPattern(LLMQuantRecipeSigmoidPattern::create(), "sigmoid", 0);
+  addPattern(LLMQuantRecipeExpPattern::create(), "exp", 0);
+  addPattern(LLMQuantRecipeLogPattern::create(), "log", 0);
+  addPattern(LLMQuantRecipeRsqrtPattern::create(), "rsqrt", 0);
+  addPattern(LLMQuantRecipeSoftplusPattern::create(), "softplus", 0);
+  addPattern(LLMQuantRecipeClipPattern::create(), "clip", 0);
   addPattern(LLMQuantRecipeReduceMinPattern::create(), "reduce_min", 0);
   addPattern(LLMQuantRecipeRoPEPattern::create(), "rope", 0);
   addPattern(LLMQuantRecipeCastTypePattern::create(), "cast_type", 0);
@@ -1130,6 +1233,8 @@ LLMQuantRecipePass::LLMQuantRecipePass() {
   addPattern(LLMQuantRecipeEmbeddingPattern::create(), "embedding", 0);
   addPattern(LLMQuantRecipeViewPattern::create(), "view", 0);
   addPattern(LLMQuantRecipeGatherPattern::create(), "gather", 0);
+  addPattern(LLMQuantRecipeReducePattern::create(), "reduce", 0);
+  addPattern(LLMQuantRecipeTopKPattern::create(), "topk", 0);
 }
 
 uint8_t LLMQuantRecipePass::run(const ir::node_ptr_t& op) {

@@ -27,19 +27,28 @@
 #include "mllm/backends/qnn/aot/visitor/Reduce.hpp"
 #include "mllm/backends/qnn/aot/visitor/Equal.hpp"
 #include "mllm/backends/qnn/aot/visitor/Sigmoid.hpp"
+#include "mllm/backends/qnn/aot/visitor/Exp.hpp"
+#include "mllm/backends/qnn/aot/visitor/Log.hpp"
+#include "mllm/backends/qnn/aot/visitor/Rsqrt.hpp"
+#include "mllm/backends/qnn/aot/visitor/Softplus.hpp"
+#include "mllm/backends/qnn/aot/visitor/Clip.hpp"
 #include "mllm/backends/qnn/aot/visitor/Matmul.hpp"
 #include "mllm/backends/qnn/aot/visitor/Repeat.hpp"
 #include "mllm/backends/qnn/aot/visitor/Softmax.hpp"
 #include "mllm/backends/qnn/aot/visitor/Where.hpp"
+#include "mllm/backends/qnn/aot/visitor/TopK.hpp"
 
 namespace mllm::qnn::aot {
 
 LLM2QnnLoweringPass::LLM2QnnLoweringPass() {
   registerPatterns<QnnAOTEmbeddingPattern, QnnAOTCastTypePattern, QnnAOTAddPattern, QnnAOTMulPattern, QnnAOTNegPattern,
+                   QnnAOTSubPattern,
                    QnnAOTViewPattern, QnnAOTIndexPattern, QnnAOTGatherPattern, QnnAOTRMSNormPattern, QnnAOTLinearPattern,
                    QnnAOTTransposePattern, QnnAOTSlicePattern, QnnAOTConcatPattern, QnnAOTRepeatPattern, QnnAOTMatMulPattern,
                    QnnAOTReduceMaxPattern, QnnAOTReduceMinPattern, QnnAOTReduceMeanPattern, QnnAOTReduceSumPattern,
-                   QnnAOTEqualPattern, QnnAOTWherePattern, QnnAOTSoftmaxPattern, QnnAOTSigmoidPattern, QnnAOTConv2DPattern>();
+                   QnnAOTEqualPattern, QnnAOTWherePattern, QnnAOTSoftmaxPattern, QnnAOTSigmoidPattern, QnnAOTConv2DPattern,
+                   QnnAOTExpPattern, QnnAOTLogPattern, QnnAOTRsqrtPattern, QnnAOTSoftplusPattern, QnnAOTClipPattern,
+                   QnnAOTTopKPattern>();
 }
 
 uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
