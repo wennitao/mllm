@@ -64,8 +64,10 @@ void PromptProcessor<T>::init_io() {
   // Output Tensors
   output_tensors_.reserve(1 + 2 * config_.num_layers);
 
-  // 1. Logits
-  auto logits = Tensor::empty({1, 1, config_.ar_len, config_.vocab_size}, kUInt16, kQNN).alloc();
+  // 1. Logits. MLLM_DENSE_LASTTOK: bin computes lm_head for ONLY the last position
+  // (see modeling_qwen_qnn_aot_sha.hpp), so logits is [1,1,1,vocab] not [1,1,ar_len,vocab].
+  const int lm_positions = std::getenv("MLLM_DENSE_LASTTOK") ? 1 : config_.ar_len;
+  auto logits = Tensor::empty({1, 1, lm_positions, config_.vocab_size}, kUInt16, kQNN).alloc();
   logits.setName("logits");
   output_tensors_.push_back(logits);
 
@@ -177,7 +179,10 @@ int64_t PromptProcessor<T>::prefill(const std::vector<int64_t>& prompt_tokens, i
     current_pos += chunk_size;
   }
 
-  auto logits = output_tensors_[0].to(kCPU).squeeze(0)[{kAll, ((int)num_tokens + config_.ar_len - 1) % config_.ar_len, kAll}];
+  // MLLM_DENSE_LASTTOK: graph emits only the last position -> read index 0.
+  const int logit_row =
+      std::getenv("MLLM_DENSE_LASTTOK") ? 0 : (((int)num_tokens + config_.ar_len - 1) % config_.ar_len);
+  auto logits = output_tensors_[0].to(kCPU).squeeze(0)[{kAll, logit_row, kAll}];
 
   if (const char* p = std::getenv("MLLM_DUMP_LOGITS")) {
     auto* data = logits.ptr<uint16_t>();

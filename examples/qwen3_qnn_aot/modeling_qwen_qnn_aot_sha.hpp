@@ -173,8 +173,11 @@ class Qwen3MLP final : public nn::Module {
     intermediate_size_ = cfg.intermediate_size;
   }
 
-  std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
-    auto x = inputs[0];
+  // The MLP intermediate panel is [Sq, intermediate_size] fp16. At Sq=1024 that is
+  // 1024*6144*2 = 12.6 MB > 8 MB VTCM on V79, so the single-graph dense MLP produces
+  // garbage at Sq>512. Tile over Sq into <=512-row slices (each panel 6.3 MB, fits)
+  // when MLLM_DENSE_TILE_MLP is set — same fix as the block-sparse split's MLLM_TILE_MLP.
+  Tensor mlpBody(Tensor x) {
     x = ptq::QDQ(this, x, "up_proj_input_qdq");
     x = x.view({1, 1, -1, hidden_size_}, true);
 
@@ -189,7 +192,24 @@ class Qwen3MLP final : public nn::Module {
     o = o.view({1, 1, -1, intermediate_size_}, true);
     o = down_proj_(o).view({1, -1, hidden_size_}, true);
 
-    return {o};
+    return o;
+  }
+
+  std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
+    auto x = inputs[0];
+    const int kTile = 512;
+    const int Sq = (x.rank() >= 2) ? (int)x.shape()[1] : 1;
+    if (std::getenv("MLLM_DENSE_TILE_MLP") && Sq > kTile && (Sq % kTile == 0)) {
+      const int n = Sq / kTile;
+      std::vector<Tensor> outs;
+      outs.reserve(n);
+      for (int t = 0; t < n; ++t) {
+        auto xt = x.slice({kAll, {t * kTile, (t + 1) * kTile}, kAll}, true);  // [1, kTile, hidden]
+        outs.push_back(mlpBody(xt));
+      }
+      return {nn::functional::concat(outs, 1)};
+    }
+    return {mlpBody(x)};
   }
 };
 
@@ -537,6 +557,21 @@ class Qwen3TextSHA final : public nn::Module {
     }
 
     x = norm_(ptq::QDQ(this, x, "norm_input_qdq"));
+    // MLLM_DENSE_LASTTOK: reduce to ONLY the last position's hidden state INSIDE
+    // the QNN graph (so its recipe propagates to lm_head). An outer-graph slice
+    // lands on the CPU side of the op_on_qnn=[lm_head] partition and breaks the
+    // recipe chain; gathering here mirrors the block-sparse chunk_L last-token
+    // gather, which flows cleanly through every AOT pass. Only the last token's
+    // logits are ever sampled, so this is exact for full-window prefill.
+    if (std::getenv("MLLM_DENSE_LASTTOK")) {
+      const int sq = x.shape()[1];
+      // The gather INDEX must be a native (input-derived) tensor — a baked
+      // constant makes QNN Gather fail to construct (err 6007). position_ids
+      // (inputs[1]) is a graph input whose last element equals the last position
+      // (sq-1) for prefill; slice that and use it as the gather index.
+      auto last_idx = position_ids.slice({{sq - 1, sq}}, /*ssa=*/true);  // [1] int32, value = sq-1
+      x = nn::functional::gather(x, 1, last_idx);  // [1, Sq, hidden] -> [1, 1, hidden]
+    }
     x = x.view({1, 1, -1, hidden_size_}, true);
 
     auto ret = std::vector<Tensor>{x};
@@ -627,6 +662,10 @@ class Qwen3ForCausalLM_SHA : public ARGeneration, public nn::Module {
     llm_inputs.insert(llm_inputs.end(), kv_caches.begin(), kv_caches.end());
 
     sequence = llm(llm_inputs)[0];
+    // MLLM_DENSE_LASTTOK: the last-token reduction now happens INSIDE the llm/QNN
+    // graph (Qwen3TextSHA::forward gathers position Sq-1) so the lm_head sees a
+    // 1-position input with a proper QNN recipe. The runner reads logits position
+    // 0 when this env is set. Only valid for a full-window prefill (num_tokens==Sq).
     sequence = lm_head_(ptq::QDQ(this, sequence, "lm_head_input_qdq"));
     sequence = ptq::QDQ(this, sequence, "lm_head_output_qdq");
     ir::lowlevel::traceComment("    ╔═════╗   ");

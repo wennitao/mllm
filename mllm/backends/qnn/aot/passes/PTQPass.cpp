@@ -56,6 +56,12 @@ void solveLinearWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr
       weight_spec->solved = true;
       break;
     }
+    case ir::linalg::QuantizationSpecType::kRaw: {
+      // Unquantized (e.g. fp16) FullyConnected weight: nothing to solve, the
+      // weight tensor is consumed as-is by the QNN graph.
+      weight_spec->solved = true;
+      break;
+    }
     default: {
       NYI("quant recipe type not support");
     }

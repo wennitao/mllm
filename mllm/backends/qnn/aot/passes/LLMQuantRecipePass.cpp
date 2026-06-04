@@ -589,6 +589,18 @@ bool LLMQuantRecipeGatherPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
     i_0->setAttr("quant_recipe", i_0_spec);
   }
 
+  // The index operand (input[1]) also needs a recipe so downstream passes (PTQ)
+  // don't deref a null spec. Graph-input indices (position_ids, last_token_index)
+  // get one from graph-input handling, but a CONSTANT index (e.g. the
+  // DENSE_LASTTOK last-position gather) does not — synthesize a raw one here.
+  if (node->inputs().size() >= 2) {
+    auto idx = *std::next(node->inputs().begin());
+    if (idx->isa_<ir::tensor::TensorValue>() && !idx->getAttr("quant_recipe")) {
+      idx->setAttr("quant_recipe",
+                   genSimpleQuantizationSpecAttr(writer.getContext(), idx->cast_<ir::tensor::TensorValue>()));
+    }
+  }
+
   auto annotation_attr = writer.getContext()->create<ir::linalg::LinalgIRQuantizatonAnnotationAttr>();
   auto op = node->cast_<ir::linalg::LinalgIROp>();
 
