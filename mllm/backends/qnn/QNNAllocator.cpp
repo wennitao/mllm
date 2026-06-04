@@ -67,9 +67,15 @@ void QNNAllocator::free(Storage* storage) {
     return;  // Not our memory or already freed, skip
   }
 
-  if (ptrToFdAndMemHandleMap_.count(storage->ptr_)) {
-    qnnInterface_.memDeRegister(&(ptrToFdAndMemHandleMap_.find(storage->ptr_)->second.second), 1);
-    ptrToFdAndMemHandleMap_.erase(storage->ptr_);
+  // Deregister this ptr from EVERY context it was registered against (a seam
+  // buffer in a multi-context model has one memHandle per context).
+  for (auto it = ptrToFdAndMemHandleMap_.begin(); it != ptrToFdAndMemHandleMap_.end();) {
+    if (it->first.first == storage->ptr_) {
+      qnnInterface_.memDeRegister(&(it->second.second), 1);
+      it = ptrToFdAndMemHandleMap_.erase(it);
+    } else {
+      ++it;
+    }
   }
 
   rpcmem_free(storage->ptr_);
@@ -80,9 +86,12 @@ void QNNAllocator::registerQnnTensorToSharedBuffer(void* ptr, Qnn_Tensor_t& qnn_
   // Make sure there has a memory that we can register to.
   MLLM_RT_ASSERT(qnnMemPtrSet_.count(ptr));
 
-  // if already registered, just set the mem handle
-  if (ptrToFdAndMemHandleMap_.count(ptr) > 0) {
-    Qnn_MemHandle_t mem_handle = ptrToFdAndMemHandleMap_[ptr].second;
+  // if already registered FOR THIS CONTEXT, just set the mem handle. A seam
+  // buffer reused across contexts registers once per context (different keys).
+  const auto key = std::make_pair(ptr, context_);
+  auto cached = ptrToFdAndMemHandleMap_.find(key);
+  if (cached != ptrToFdAndMemHandleMap_.end()) {
+    Qnn_MemHandle_t mem_handle = cached->second.second;
     QNN_TENSOR_SET_MEM_TYPE(qnn_tensor, QNN_TENSORMEMTYPE_MEMHANDLE);
     QNN_TENSOR_SET_MEM_HANDLE(qnn_tensor, mem_handle);
     return;
@@ -110,13 +119,21 @@ void QNNAllocator::registerQnnTensorToSharedBuffer(void* ptr, Qnn_Tensor_t& qnn_
 
   QNN_TENSOR_SET_MEM_HANDLE(qnn_tensor, mem_handle);
 
-  ptrToFdAndMemHandleMap_.insert({ptr, {mem_fd, mem_handle}});
+  ptrToFdAndMemHandleMap_.insert({key, {mem_fd, mem_handle}});
 }
 
 void QNNAllocator::deRegisterQnnTensorFromSharedBuffer(void* ptr) {
-  MLLM_RT_ASSERT_EQ(ptrToFdAndMemHandleMap_.count(ptr), 1);
-  MLLM_RT_ASSERT_EQ(QNN_SUCCESS, qnnInterface_.memDeRegister(&(ptrToFdAndMemHandleMap_[ptr].second), 1));
-  ptrToFdAndMemHandleMap_.erase(ptr);
+  bool found = false;
+  for (auto it = ptrToFdAndMemHandleMap_.begin(); it != ptrToFdAndMemHandleMap_.end();) {
+    if (it->first.first == ptr) {
+      MLLM_RT_ASSERT_EQ(QNN_SUCCESS, qnnInterface_.memDeRegister(&(it->second.second), 1));
+      it = ptrToFdAndMemHandleMap_.erase(it);
+      found = true;
+    } else {
+      ++it;
+    }
+  }
+  MLLM_RT_ASSERT(found);
 }
 
 std::shared_ptr<QNNAllocator> createQNNAllocator() { return std::make_shared<QNNAllocator>(); }

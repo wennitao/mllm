@@ -38,6 +38,7 @@ ModelError_t QNNModel::initialize(const Qnn_ContextHandle_t& context, const char
   }
 
   graphName_ = graphName;
+  context_ = context;
   debug_ = debug;
   doNodeValidations_ = doNodeValidations;
 
@@ -72,6 +73,7 @@ ModelError_t QNNModel::initializeFromContext(const Qnn_ContextHandle_t& context,
 
   graphName_ = graphName;
   graph_ = graph;
+  context_ = context;
 
   // Load tensor information from the provided tensor arrays
   ModelError_t err = loadGraphTensorInfo(inputTensors, numInputTensors, outputTensors, numOutputTensors);

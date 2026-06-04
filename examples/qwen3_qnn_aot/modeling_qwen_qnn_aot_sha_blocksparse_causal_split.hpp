@@ -68,11 +68,11 @@ using vi32 = std::vector<int32_t>;
 
 // Match the monolithic variant. Reused at trace time and by the runner for
 // per-qb slicing.
-constexpr int kBQ = 32;
-constexpr int kBK = 32;
+constexpr int kBQ = 64;  // BK comparison: 32 vs 64 (KEEP IN SYNC with ShaBlockSparsePromptProcessorSplit.hpp)
+constexpr int kBK = 64;  // BK comparison: 32 vs 64 (KEEP IN SYNC with ShaBlockSparsePromptProcessorSplit.hpp)
 constexpr int kTopK = 8;
-constexpr int kTopKBK = kTopK * kBK;        // 256
-constexpr int kHistKBK = (kTopK - 1) * kBK; // 224
+constexpr int kTopKBK = kTopK * kBK;        // 256 @BK=32 / 512 @BK=64
+constexpr int kHistKBK = (kTopK - 1) * kBK; // 224 @BK=32 / 448 @BK=64
 
 // ============================================================================
 // Attention module: per-head Q/K/V proj, RMSNorm, RoPE, O-proj. No mask/softmax
@@ -347,6 +347,23 @@ class Qwen3DecoderSplit final : public nn::Module {
     h = residual2 + ptq::QDQ(this, h, "add_1_lhs_input_qdq");
     return {h};
   }
+
+  // ----- post_attn + MLP folded into one graph, dispatched ×2 over halves ----
+  // Each call: o_proj + residual add + post_norm + MLP on its token half →
+  // {residual2_half, mlp_out_half}. No separate postnorm graph; combine joins.
+  std::vector<Tensor> mlp(Tensor residual_half, Tensor attn_half) {
+    auto residual = ptq::QDQ(this, residual_half, "input_layernorm_input_qdq");
+    auto y = self_attn_.post(attn_half)[0];
+    auto h = ptq::QDQ(this, residual + ptq::QDQ(this, y, "add_0_lhs_input_qdq"), "add_0_output_qdq");
+    auto residual2 = h.to(kFloat16);
+    auto m = ptq::QDQ(this, mlp_.forward({post_attention_layernorm_(h)}, {})[0], "add_1_lhs_input_qdq").to(kFloat16);
+    return {residual2, m};
+  }
+  std::vector<Tensor> combine(Tensor residual2, Tensor mlp_out) {
+    auto r2 = ptq::QDQ(this, residual2, "add_0_output_qdq");
+    auto m = ptq::QDQ(this, mlp_out, "add_1_lhs_input_qdq");
+    return {r2 + m};
+  }
 };
 
 // ============================================================================
@@ -419,24 +436,53 @@ class Chunk0Module final : public nn::Module {
   }
 };
 
-class MidChunkModule final : public nn::Module {
+// MLP split: MidChunk → post_attn (residual2,mlp_in); MlpChunk → one half; PreChunk → combine+pre.
+class MlpChunkModule final : public nn::Module {
  public:
-  Qwen3TextSplit* llm_ = nullptr;
-  int layer_i_post_ = 0;  // layer index whose post-attn runs
-  // pre_i for layer (layer_i_post_+1) runs in the same chunk.
-
-  MidChunkModule() = default;
-  MidChunkModule(const std::string& name, Qwen3TextSplit* llm, int layer_i_post)
-      : nn::Module(name), llm_(llm), layer_i_post_(layer_i_post) {}
-
+  Qwen3TextSplit* llm_ = nullptr; int layer_i_ = 0;
+  MlpChunkModule() = default;
+  MlpChunkModule(const std::string& name, Qwen3TextSplit* llm, int layer_i) : nn::Module(name), llm_(llm), layer_i_(layer_i) {}
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>&) override {
-    auto residual = inputs[0];
-    auto attn_output = inputs[1];
-    auto position_ids = inputs[2];
-    auto h = llm_->decoders_[layer_i_post_].post(residual, attn_output)[0];
-    auto sin = nn::functional::gather(ptq::QDQ_ROPE(llm_, llm_->rope_sin_(), "sin_embedding_input_qdq"), 1, position_ids);
-    auto cos = nn::functional::gather(ptq::QDQ_ROPE(llm_, llm_->rope_cos_(), "cos_embedding_input_qdq"), 1, position_ids);
-    return llm_->decoders_[layer_i_post_ + 1].pre(h, sin, cos);  // {residual, q, k_curr, v_curr}
+    return llm_->decoders_[layer_i_].mlp(inputs[0], inputs[1]);  // {residual2_half, mlp_out_half}
+  }
+};
+class PreChunkModule final : public nn::Module {
+ public:
+  Qwen3TextSplit* llm_ = nullptr; int layer_i_post_ = 0;
+  PreChunkModule() = default;
+  PreChunkModule(const std::string& name, Qwen3TextSplit* llm, int layer_i_post) : nn::Module(name), llm_(llm), layer_i_post_(layer_i_post) {}
+  std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>&) override {
+    auto h = llm_->decoders_[layer_i_post_].combine(inputs[0], inputs[1])[0];
+    auto sin = nn::functional::gather(ptq::QDQ_ROPE(llm_, llm_->rope_sin_(), "sin_embedding_input_qdq"), 1, inputs[2]);
+    auto cos = nn::functional::gather(ptq::QDQ_ROPE(llm_, llm_->rope_cos_(), "cos_embedding_input_qdq"), 1, inputs[2]);
+    return llm_->decoders_[layer_i_post_ + 1].pre(h, sin, cos);
+  }
+};
+
+// Original fused chunks (MLLM_TILE_MLP unset): post() runs MLP inline.
+class OrigMidChunkModule final : public nn::Module {
+ public:
+  Qwen3TextSplit* llm_ = nullptr; int layer_i_post_ = 0;
+  OrigMidChunkModule() = default;
+  OrigMidChunkModule(const std::string& name, Qwen3TextSplit* llm, int lp) : nn::Module(name), llm_(llm), layer_i_post_(lp) {}
+  std::vector<Tensor> forward(const std::vector<Tensor>& in, const std::vector<AnyValue>&) override {
+    auto h = llm_->decoders_[layer_i_post_].post(in[0], in[1])[0];
+    auto sin = nn::functional::gather(ptq::QDQ_ROPE(llm_, llm_->rope_sin_(), "sin_embedding_input_qdq"), 1, in[2]);
+    auto cos = nn::functional::gather(ptq::QDQ_ROPE(llm_, llm_->rope_cos_(), "cos_embedding_input_qdq"), 1, in[2]);
+    return llm_->decoders_[layer_i_post_ + 1].pre(h, sin, cos);
+  }
+};
+class OrigFinalChunkModule final : public nn::Module {
+ public:
+  Qwen3TextSplit* llm_; nn::Module* root_; nn::Conv2D* lm_head_; int hidden_size_, last_layer_idx_;
+  OrigFinalChunkModule() = default;
+  OrigFinalChunkModule(const std::string& n, Qwen3TextSplit* l, nn::Module* r, nn::Conv2D* h, int hs, int li) : nn::Module(n), llm_(l), root_(r), lm_head_(h), hidden_size_(hs), last_layer_idx_(li) {}
+  std::vector<Tensor> forward(const std::vector<Tensor>& in, const std::vector<AnyValue>&) override {
+    auto h = llm_->decoders_[last_layer_idx_].post(in[0], in[1])[0];
+    h = llm_->norm_(ptq::QDQ(llm_, h, "norm_input_qdq"));
+    h = nn::functional::gather(h, 1, in[2]).view({1, 1, -1, hidden_size_}, true);
+    auto logits = ptq::QDQ(root_, (*lm_head_)(ptq::QDQ(root_, h, "lm_head_input_qdq")), "lm_head_output_qdq");
+    return {logits};
   }
 };
 
@@ -453,10 +499,10 @@ class FinalChunkModule final : public nn::Module {
       : nn::Module(name), llm_(llm), root_(root), lm_head_(lm_head), hidden_size_(hidden_size), last_layer_idx_(last_layer_idx) {}
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>&) override {
-    auto residual = inputs[0];
-    auto attn_output = inputs[1];
+    auto residual2 = inputs[0];
+    auto mlp_out = inputs[1];
     auto last_token_index = inputs[2];  // [1, 1] int32 — position of the last real prompt token
-    auto h = llm_->decoders_[last_layer_idx_].post(residual, attn_output)[0];  // [1, Sq, hidden]
+    auto h = llm_->decoders_[last_layer_idx_].combine(residual2, mlp_out)[0];  // [1, Sq, hidden]
     h = llm_->norm_(ptq::QDQ(llm_, h, "norm_input_qdq"));                      // [1, Sq, hidden]
     // Only the last real token's logits are ever sampled, so gather that one
     // position BEFORE lm_head. Running lm_head over all Sq positions wastes
@@ -590,20 +636,21 @@ class Qwen3ForCausalLM_SHABlockSparseCausalSplit : public ARGeneration, public n
         result["attn_" + si] = ir::lowlevel::traceStop();
       }
 
-      // chunk_{i+1}: post_i + (pre_{i+1} if not last, else final norm + lm_head)
+      // MLLM_TILE_MLP: MLP as 2 separate graphs (postnorm/mlp_0/mlp_1) + combine.
+      // Unset: original fused chunk (post incl. MLP) — both gated by env in the runner too.
+      const bool tile_mlp = std::getenv("MLLM_TILE_MLP") != nullptr;
       auto residual = input.at("residual_pre_attn_" + si);
       auto attn_output = input.at("attn_output_" + si);
-      if (i + 1 < L) {
-        MidChunkModule mid("chunk_" + std::to_string(i + 1), &llm_, i);
-        ir::lowlevel::traceStart();
-        (void)mid(residual, attn_output, position_ids);
-        result["chunk_" + std::to_string(i + 1)] = ir::lowlevel::traceStop();
+      auto last_token_index_t = (i + 1 < L) ? mllm::Tensor() : input.at("last_token_index");
+      if (tile_mlp) {
+        // chunk_{i+1} compiled at Sq/2, runner dispatches ×2 over halves: full post+pre
+        // (incl. MLP) per half → MLP panels fit VTCM, no extra graphs (=58, fits PD).
+        if (i + 1 < L) { OrigMidChunkModule mid("chunk_" + std::to_string(i + 1), &llm_, i); ir::lowlevel::traceStart(); (void)mid(input.at("res_half_" + si), input.at("attn_half_" + si), input.at("position_half")); result["chunk_" + std::to_string(i + 1)] = ir::lowlevel::traceStop(); }
+        else { OrigFinalChunkModule fin("chunk_" + std::to_string(i + 1), &llm_, this, &lm_head_, cfg_.hidden_size, i); ir::lowlevel::traceStart(); (void)fin(input.at("res_half_" + si), input.at("attn_half_" + si), last_token_index_t); result["chunk_" + std::to_string(i + 1)] = ir::lowlevel::traceStop(); }
+      } else if (i + 1 < L) {
+        OrigMidChunkModule mid("chunk_" + std::to_string(i + 1), &llm_, i); ir::lowlevel::traceStart(); (void)mid(residual, attn_output, position_ids); result["chunk_" + std::to_string(i + 1)] = ir::lowlevel::traceStop();
       } else {
-        FinalChunkModule fin("chunk_" + std::to_string(i + 1), &llm_, this, &lm_head_, cfg_.hidden_size, i);
-        auto last_token_index = input.at("last_token_index");
-        ir::lowlevel::traceStart();
-        (void)fin(residual, attn_output, last_token_index);
-        result["chunk_" + std::to_string(i + 1)] = ir::lowlevel::traceStop();
+        OrigFinalChunkModule fin("chunk_" + std::to_string(i + 1), &llm_, this, &lm_head_, cfg_.hidden_size, i); ir::lowlevel::traceStart(); (void)fin(residual, attn_output, last_token_index_t); result["chunk_" + std::to_string(i + 1)] = ir::lowlevel::traceStop();
       }
     }
 

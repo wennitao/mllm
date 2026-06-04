@@ -26,6 +26,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
@@ -128,6 +129,11 @@ MLLM_MAIN({
   auto& qnn_aot_cfg_files = Argparse::add<std::string>("-aot_cfg|--qnn_aot_cfg").help("Path to QNN AOT config json");
   auto& qnn_env_path = Argparse::add<std::string>("-e|--qnn_env_path").help("QNN env / driver path").def(defaultQnnEnvPath());
   auto& sq_arg = Argparse::add<int>("--sq").help("Sequence length for the full-Sq chunks").def(1024);
+  auto& num_ctx_arg = Argparse::add<int>("--num_contexts")
+                          .help("Partition the 2L+1 chunks across N HTP context bins (multi-context split to fit the "
+                                "~3.6GB per-context PD ceiling). 1 = single context (default).")
+                          .def(1);
+  auto& mir_out_dir = Argparse::add<std::string>("--mir_out_dir").help("Directory for MIR dumps (created if missing). Default: cwd.").def("");
 
   Argparse::parse(argc, argv);
   if (help.isSet()) { Argparse::printHelp(); return 0; }
@@ -141,6 +147,16 @@ MLLM_MAIN({
   const int BQ = bsc::kBQ;
   const int top_k_BK = bsc::kTopKBK;
   const int hist_k_BK = bsc::kHistKBK;
+
+  // MIR-dump output prefix. If --mir_out_dir is set, create it and prepend to
+  // every dump filename so all .mir files land in one place (~340 of them at
+  // L=28, Sq=1024). Empty = cwd, original behavior.
+  std::string mir_prefix;
+  if (!mir_out_dir.get().empty()) {
+    std::filesystem::create_directories(mir_out_dir.get());
+    mir_prefix = mir_out_dir.get();
+    if (mir_prefix.back() != '/') mir_prefix += '/';
+  }
 
   auto model_cfg = mllm::models::qwen3::Qwen3Config(model_cfg_path.get());
   const int L = model_cfg.num_hidden_layers;
@@ -205,6 +221,7 @@ MLLM_MAIN({
   // Index of the last real prompt token; chunk_L gathers this single position
   // before lm_head so the head runs at M=1 instead of M=Sq.
   trace_inputs["last_token_index"] = mllm::Tensor::zeros({1, 1}, mllm::kInt32);
+  trace_inputs["position_half"] = mllm::Tensor::zeros({1, Sq/2}, mllm::kInt32);
 
   // ----- mask (shared across every attn_i dispatch) --------------------------
   {
@@ -275,6 +292,9 @@ MLLM_MAIN({
       auto t = mllm::Tensor::zeros({1, Hq, Sq, D}, mllm::kFloat16);
       trace_inputs["attn_output_" + si] = t;
     }
+    // MLP-as-separate-graph boundaries (fp16): residual2, mlp_in halves, mlp_out.
+    trace_inputs["res_half_" + si] = mllm::Tensor::zeros({1, Sq / 2, hidden}, mllm::kFloat16);
+    trace_inputs["attn_half_" + si] = mllm::Tensor::zeros({1, Hq, Sq / 2, D}, mllm::kFloat16);
 
     // q_i_qb / k_curr_i_qb / v_curr_i_qb — per-qb slices, same scales as the
     // full-Sq buffers they're sliced from.
@@ -332,34 +352,53 @@ MLLM_MAIN({
   // Trace — returns 2L+1 IRs keyed by chunk_0, chunk_1, ..., chunk_L, attn_0,
   // ..., attn_{L-1}.
   // ===========================================================================
-  mllm::print("Tracing SPLIT model (Sq={}, BQ={}, L={}, expected graphs={})...", Sq, BQ, L, 2 * L + 2);
+  mllm::print("Tracing SPLIT model (Sq={}, BQ={}, L={}, expected graphs={})...", Sq, BQ, L, 5 * L + 2);
   auto ir = model.trace(trace_inputs, {});
   mllm::print("Trace complete. {} IRs produced.", ir.size());
 
   // Dump pre-lowering MIR per chunk for debugging.
   for (auto& kv : ir) {
-    const std::string fname = "qwen3_split_PRE_" + kv.first + ".mir";
+    const std::string fname = mir_prefix + "qwen3_split_PRE_" + kv.first + ".mir";
     mllm::redirect(fname, [&]() { mllm::print(kv.second); });
   }
 
   // Lower each chunk independently. The shared qnn_aot_env accumulates them
   // all into one context binary.
   std::vector<std::string> chunk_order;
-  chunk_order.reserve(2 * L + 2);
+  const bool tile_mlp = std::getenv("MLLM_TILE_MLP") != nullptr;
+  chunk_order.reserve(5 * L + 2);
   chunk_order.push_back("chunk_0");
   for (int i = 0; i < L; ++i) {
-    chunk_order.push_back("attn_" + std::to_string(i));
+    chunk_order.push_back("attn_" + std::to_string(i));  // tiled: chunk compiled Sq/2, dispatched ×2
     chunk_order.push_back("chunk_" + std::to_string(i + 1));
   }
   if (std::getenv("MLLM_BAKE_SCORE")) chunk_order.push_back("score");  // AOT score (opt-in)
   // Fast-feasibility: lower ONLY the score graph (validates fp16-matmul lowering
   // + saves a throwaway context quickly) when MLLM_SCORE_ONLY is set.
   if (std::getenv("MLLM_SCORE_ONLY")) { chunk_order = {"score"}; }
+
+  // Multi-context split: assign each chunk to one of NC HTP contexts by its
+  // layer index (even split over L layers). The clean seam is a chunk→chunk cut:
+  // chunk_M (the pre-proj into layer M) is the first graph of context k+1 and
+  // reads residual_{M-1} + attn_output_{M-1} produced by context k. So both
+  // chunk_j and attn_j map to the same context floor(j*NC/L) and the only
+  // cross-context tensors are those two boundary buffers (handled at runtime by
+  // per-context buffer registration). The "score" graph (opt-in) goes to ctx 0.
+  const int NC = std::max(1, num_ctx_arg.get());
+  auto ctx_for_graph = [&](const std::string& name) -> int {
+    if (NC <= 1) return 0;
+    auto layer_ctx = [&](int j) { return std::min(NC - 1, j * NC / L); };
+    if (name.rfind("chunk_", 0) == 0) return layer_ctx(std::stoi(name.substr(6)));
+    if (name.rfind("attn_", 0) == 0) return layer_ctx(std::stoi(name.substr(5)));
+    return 0;  // score / misc
+  };
+
   for (const auto& name : chunk_order) {
     if (ir.find(name) == ir.end()) {
       MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "Missing IR for {}", name);
     }
-    mllm::print("Lowering {}...", name);
+    const int ctx_idx = ctx_for_graph(name);
+    mllm::print("Lowering {} -> context.{}...", name, ctx_idx);
     mllm::ir::PassManager pm(ir[name]);
     pm.reg(mllm::qnn::aot::createQnnAOTLoweringPipeline(&qnn_aot_env, qnn_aot_cfg_files.get(), params));
     // The AOT config's "graph_on_qnn" whitelist names which graph the QNN
@@ -374,13 +413,26 @@ MLLM_MAIN({
     // LLM2QnnLowering passes to operate on this pre-split chunk instead of
     // the standard "model" graph (see those passes' early-return branches).
     cfg["chunk_graph_name"] = name;
+    // chunk_context_name tells LLM2QnnLoweringPass which HTP context this chunk's
+    // graph lands in (context.0 by default; context.k for the multi-context split).
+    cfg["chunk_context_name"] = "context." + std::to_string(ctx_idx);
     pm.run();
-    mllm::redirect("qwen3_split_POST_" + name + ".mir", [&]() { mllm::print(ir[name]); });
+    mllm::redirect(mir_prefix + "qwen3_split_POST_" + name + ".mir", [&]() { mllm::print(ir[name]); });
   }
   }  // end trace_inputs + ir scope
 
-  qnn_aot_env.saveContext("context.0", "qwen3-lpbq-sha-blocksparse-causal-split.bin");
-  mllm::print("SPLIT-PREFILL compilation complete. {} graphs in one context (incl. 1 score).", 2 * L + 2);
+  // Emit one .bin per context. Single-context (NC=1) keeps the original name;
+  // multi-context appends -c{k}of{NC} so the runtime loads them as a group.
+  const int NC = std::max(1, num_ctx_arg.get());
+  const std::string base = "qwen3-bsBK" + std::to_string(bsc::kBK) + "-sq" + std::to_string(sq_arg.get());
+  for (int c = 0; c < NC; ++c) {
+    const std::string ctx = "context." + std::to_string(c);
+    const std::string binname = (NC == 1) ? base + ".bin"
+                                          : base + "-c" + std::to_string(c) + "of" + std::to_string(NC) + ".bin";
+    qnn_aot_env.saveContext(ctx, binname);
+    mllm::print("Saved {} -> {}", ctx, binname);
+  }
+  mllm::print("SPLIT-PREFILL compilation complete. {} graphs across {} context(s).", 5 * L + 2, NC);
 
   // FIXME(split-prefill): at Sq=1024 the program-exit destructor chain
   // crashes inside align_free → TensorStorage::~ → QNNTensorWrapper::~ →

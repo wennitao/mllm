@@ -68,6 +68,11 @@ class QNNModel {
 
   Qnn_GraphHandle_t getQnnGraph() { return graph_; }
 
+  // Owning HTP context. Needed by the multi-context (grouped-bin) runtime so
+  // graphExecute can point the allocator at THIS graph's context before binding
+  // I/O, ensuring each rpcmem buffer is memRegister'd against the right context.
+  Qnn_ContextHandle_t getContext() const { return context_; }
+
   std::string getQnnGraphName() { return graphName_; }
 
   // Get input/output tensor wrappers
@@ -87,6 +92,7 @@ class QNNModel {
 
  private:
   Qnn_GraphHandle_t graph_ = nullptr;
+  Qnn_ContextHandle_t context_ = nullptr;  // owning HTP context (for multi-context routing)
   std::string graphName_;
   bool debug_ = false;  // flag to indicate if requested graph is to be run in debug mode
   // (i.e. all intermediate tensors will be accessible to client)

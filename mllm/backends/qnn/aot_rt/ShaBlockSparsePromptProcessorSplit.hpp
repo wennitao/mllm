@@ -72,11 +72,11 @@ class ShaBlockSparsePromptProcessorSplit {
   void enableScoreBasedSelection(const std::vector<int32_t>& q_zp, const std::vector<float>& q_scale,
                                  const std::vector<float>& k_scale);
 
-  static constexpr int kBQ = 32;
-  static constexpr int kBK = 32;
+  static constexpr int kBQ = 64;  // BK comparison: 32 vs 64 (KEEP IN SYNC with modeling_..._split.hpp)
+  static constexpr int kBK = 64;  // BK comparison: 32 vs 64 (KEEP IN SYNC with modeling_..._split.hpp)
   static constexpr int kTopK = 8;
-  static constexpr int kTopKBK = kTopK * kBK;        // 256
-  static constexpr int kHistKBK = (kTopK - 1) * kBK; // 224
+  static constexpr int kTopKBK = kTopK * kBK;        // 256 @BK=32 / 512 @BK=64
+  static constexpr int kHistKBK = (kTopK - 1) * kBK; // 224 @BK=32 / 448 @BK=64
   static constexpr uint16_t kMaskActive = 65535;
   static constexpr uint16_t kMaskMasked = 0;
 
@@ -134,8 +134,11 @@ class ShaBlockSparsePromptProcessorSplit {
 
   // 2L+1 graphs as QnnAOTModule instances. Each instance carries its
   // compile-time graph name.
-  std::vector<std::unique_ptr<QnnAOTModule>> chunks_;  // size L+1
-  std::vector<std::unique_ptr<QnnAOTModule>> attns_;   // size L
+  std::vector<std::unique_ptr<QnnAOTModule>> chunks_;     // size L+1 (chunk_0, combine+pre, final)
+  std::vector<std::unique_ptr<QnnAOTModule>> attns_;      // size L
+  std::vector<std::unique_ptr<QnnAOTModule>> postnorms_;  // size L (tiled only)
+  std::vector<std::unique_ptr<QnnAOTModule>> mlps_;       // size 2L (tiled only)
+  bool tile_mlp_ = false;  // MLLM_TILE_MLP — split MLP into 2 graphs; must match the .bin
   // NPU block-selection scoring (env MLLM_BLOCKSEL_NPU; needs the baked "score"
   // graph, FIXED stride S=8). One shared graph dispatched per layer: logits =
   // qr · kc. qr [Hq,Lr,SD] fp16, kc PRE-TRANSPOSED [Hq,SD,Lr] fp16, logits
@@ -164,6 +167,8 @@ class ShaBlockSparsePromptProcessorSplit {
   std::vector<std::vector<Tensor>> chunk_out_;  // size L+1
   std::vector<std::vector<Tensor>> attn_in_;    // size L
   std::vector<std::vector<Tensor>> attn_out_;   // size L
+  std::vector<std::vector<Tensor>> postnorm_in_;   // size L
+  std::vector<std::vector<Tensor>> postnorm_out_;  // size L
 
   // Top-level inputs (chunk_0 inputs) and shared position_ids.
   Tensor input_ids_;
@@ -180,6 +185,16 @@ class ShaBlockSparsePromptProcessorSplit {
   std::vector<Tensor> k_curr_full_;       // [1, Hkv, D, Sq]            uint8   size L
   std::vector<Tensor> v_curr_full_;       // [1, Hkv, Sq, D]            uint8   size L
   std::vector<Tensor> attn_output_full_;  // [1, Hq, Sq, D]             uint16  size L
+  // MLP-as-separate-graph buffers: postnorm_i → residual2_full + mlp_in (2 half
+  // slabs); mlp_0/1 → mlp_out (2 half slabs); chunk_{i+1} reads residual2+mlp_out.
+  std::vector<Tensor> residual2_full_;    // [1, Sq, hidden] fp16  size 1
+  std::vector<Tensor> mlp_in_half_;       // [1, Sq/2, hidden] fp16  size 2
+  std::vector<Tensor> mlp_out_half_;      // [1, Sq/2, hidden] fp16  size 2
+  std::vector<Tensor> mlp_out_full_;      // unused in chunk-tile path
+  std::vector<Tensor> attn_half_;         // [1, Hq, Sq/2, D] fp16  size 2 (chunk attn-input half)
+  std::vector<Tensor> res2_half_;         // [1, Sq/2, hidden] fp16  size 2 (chunk residual-out half)
+  Tensor pos_half_;                       // [1, Sq/2] int32 — per-half position ids
+  Tensor q_half_, kc_half_, vc_half_;     // chunk pre outputs at Sq/2, joined into *_full_
 
   // Per-qb staging buffers, DOUBLE-BUFFERED (size 2, indexed by qb%2). The NPU
   // attn dispatch for qb reads slot qb%2 while the (optional) pipeline worker

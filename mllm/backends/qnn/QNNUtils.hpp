@@ -213,6 +213,14 @@ class QNNTensorWrapper {
     dataContainer_ = tensor;
     if (!tensor.isNil()) { isAlloc_ = true; }
   }
+  // Clear the bound data container so the next graphExecute re-binds to a
+  // freshly-passed runtime tensor (double-buffer slot switch). The mem-handle
+  // registration stays cached in the allocator, so the next alloc() is a cheap
+  // handle swap, not a re-memRegister.
+  void resetForRebind() {
+    dataContainer_ = Tensor();
+    isAlloc_ = false;
+  }
 
   // Helper to set complex quantization params and manage memory
   void setScaleOffsetQuantization(const std::vector<Qnn_ScaleOffset_t>& scaleOffsets, int32_t axis);

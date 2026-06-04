@@ -134,6 +134,13 @@ add_executable(mllm-qwen3-aot-sha-blocksparse-monolithic-runner aot_run_sha_bloc
 target_link_libraries(mllm-qwen3-aot-sha-blocksparse-monolithic-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-aot-sha-blocksparse-monolithic-runner PRIVATE ${MLLM_INCLUDE_DIR})
 
+# PD-pooling proof probe: load two weight-bearing context bins into ONE HTP
+# spill-fill group and report whether both reserve PD. Tests pool-vs-sum for the
+# multi-context-split plan. No graph execute / tokenizer needed.
+add_executable(mllm-qwen3-pd-pool-probe pd_pool_probe.cpp)
+target_link_libraries(mllm-qwen3-pd-pool-probe PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-pd-pool-probe PRIVATE ${MLLM_INCLUDE_DIR})
+
 # Attn-only AOT pipeline micro-benchmark: sync vs gather-overlap pipeline on the
 # real quantized attn graphs (qwen3-attn-only.bin). Verifies the pipeline does
 # not beat sync in the short-dispatch + slow-gather regime.

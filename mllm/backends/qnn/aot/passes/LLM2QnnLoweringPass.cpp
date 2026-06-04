@@ -148,11 +148,19 @@ uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
   auto aot_cfg = AOTCompileContext::getInstance().getConfig();
   auto aot_env = AOTCompileContext::getInstance().getEnv();
 
-  // FIXME: Only support one context right now.
+  // Target context for this chunk. The standard (monolithic) path keeps a
+  // single "context.0" (split_graph must stay 1). The split-prefill path may
+  // partition its 2L+1 chunks across SEVERAL HTP contexts (multi-context split,
+  // to keep each context's PD reservation under the ~3.6 GB per-context ceiling):
+  // the compile driver sets chunk_context_name = "context.<k>" per chunk and
+  // saveContext()s each context to its own .bin. createContext is idempotent, so
+  // calling it per chunk just creates context.k on first encounter.
+  const std::string ctx_name =
+      AOTCompileContext::getInstance().getConfig().value("chunk_context_name", std::string{"context.0"});
   {
     int split_graph = aot_cfg["split_graph"];
     MLLM_RT_ASSERT_EQ(split_graph, 1);
-    aot_env->createContext("context.0", true);
+    aot_env->createContext(ctx_name, true);
   }
 
   // Process each subgraph in order
@@ -164,17 +172,17 @@ uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
     // Create IRWriter for this subgraph
     auto subgraph_writer = ir::IRWriter(getCtx(), region);
 
-    auto aot_graph = aot_env->captureAOTGraph("context.0", subgraph_name);
+    auto aot_graph = aot_env->captureAOTGraph(ctx_name, subgraph_name);
 
     // Add sub-graph inputs
     for (auto& input : region->inputs()) {
       auto tensor_input = input->cast_<ir::tensor::TensorValue>();
-      if (tensor_input) { aot_env->captureQnnAOTNodeTensor("context.0", subgraph_name, tensor_input); }
+      if (tensor_input) { aot_env->captureQnnAOTNodeTensor(ctx_name, subgraph_name, tensor_input); }
     }
     // Add sub-graph outputs
     for (auto& output : region->outputs()) {
       auto tensor_output = output->cast_<ir::tensor::TensorValue>();
-      if (tensor_output) { aot_env->captureQnnAOTNodeTensor("context.0", subgraph_name, tensor_output); }
+      if (tensor_output) { aot_env->captureQnnAOTNodeTensor(ctx_name, subgraph_name, tensor_output); }
     }
 
     // Walk through all linalg operations in the subgraph

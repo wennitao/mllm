@@ -94,6 +94,14 @@ class QNNBackend final : public Backend {
   ~QNNBackend();
 
   bool loadContext(const std::string& contextPath);
+  // Load SEVERAL context bins as ONE spill-fill group (multi-context split):
+  // bins[0] anchors a new group (firstGroupHandle=0), the rest JOIN it
+  // (firstGroupHandle=anchor). All graphs across all bins merge into one index
+  // map; graphExecute routes each to its owning context, and the allocator keys
+  // registrations by (ptr,context) so seam buffers register against both bins.
+  // Used to fit a model whose single-context PD reservation would exceed the
+  // ~3.6 GB per-context ceiling. A 1-path list falls back to loadContext.
+  bool loadContextGroup(const std::vector<std::string>& contextPaths);
   bool createContext();
   void saveContext(const std::string& contextPath = "qnn_context.bin");
 
@@ -109,6 +117,17 @@ class QNNBackend final : public Backend {
   bool beginAuxContext(uint64_t max_spill_fill_mb);
   void endAuxContext();
 
+  // PD-pooling / cap-locality proof: load a LIST of weight-bearing context bins
+  // into ONE HTP spill-fill group (bins[0] = anchor, firstGroupHandle=0; the
+  // rest join via firstGroupHandle=anchor) and report how many reserve PD before
+  // the device runs out. Determines whether the ~3.6 GB V79 PD cap is
+  // per-context (so splitting 28L into bins trivially fits) or per-device-total
+  // (so splitting only saves the shared spill-fill delta) — the open question
+  // for the multi-context-split plan. beginAuxContext only proved the join for a
+  // WEIGHTLESS aux graph; here every bin carries weights. No graph execute: PD
+  // is reserved at contextCreateFromBinary. Returns the number of bins loaded.
+  int loadBinsOneGroup(const std::vector<std::string>& bins, uint64_t sf_mb);
+
   bool isWeightOnDevice() override { return false; }
 
   // QNN Graph build interfaces
@@ -123,6 +142,11 @@ class QNNBackend final : public Backend {
   bool graphFinalize(const std::string& graphName);
 
   void graphExecute(const std::string& graphName, std::vector<Tensor>& inputs, std::vector<Tensor>& outputs);
+
+  // Clear a graph's I/O tensor-wrapper bindings so the next graphExecute
+  // re-binds them to the tensors passed in that call (for dispatching one AOT
+  // graph against alternating double-buffer slots). Cheap: registration cached.
+  void resetGraphIOForRebind(const std::string& graphName);
 
   // Tensor management interfaces
   bool addTensor(const std::string& graphName, const std::string& tensorName, Qnn_TensorType_t type, const Tensor& tensor,
@@ -145,6 +169,7 @@ class QNNBackend final : public Backend {
   Qnn_ContextHandle_t context_ = nullptr;
   Qnn_ContextHandle_t aux_context_ = nullptr;   // 2nd context for runtime-built graphs
   Qnn_ContextHandle_t main_context_ = nullptr;  // saved model context while aux is active
+  std::vector<Qnn_ContextHandle_t> group_contexts_;  // all model bins when loaded as a group
   std::unique_ptr<QNNRuntime> runtime_;
   std::unique_ptr<QNNPerf> perf_;
 

@@ -125,7 +125,12 @@ class QNNAllocator final : public Allocator {
 
   // to check if the ptr is allocted by rpcmem_alloc
   std::set<void*> qnnMemPtrSet_;
-  std::map<void*, std::pair<int, Qnn_MemHandle_t>> ptrToFdAndMemHandleMap_;
+  // Registration cache keyed by (ptr, context). A buffer shared across the seam
+  // of a multi-context (grouped-bin) model is bound to graphs in TWO contexts;
+  // memRegister is per-context, so each context needs its own memHandle for the
+  // same ptr. Single-context runs key on (ptr, the one context) — same behavior
+  // as the old ptr-only cache.
+  std::map<std::pair<void*, Qnn_ContextHandle_t>, std::pair<int, Qnn_MemHandle_t>> ptrToFdAndMemHandleMap_;
 
   // Flag to indicate shutdown has been called or destructor is running
   // When true, free() calls become no-ops to avoid crashes during program exit

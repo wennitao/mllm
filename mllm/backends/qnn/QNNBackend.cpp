@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -12,6 +13,7 @@
 
 #include "mllm/backends/qnn/QNNBackend.hpp"
 #include "mllm/backends/qnn/QNNUtils.hpp"
+#include "mllm/backends/qnn/QNNTypeMacros.hpp"
 #include "mllm/backends/qnn/QNNAllocator.hpp"
 #include "mllm/backends/qnn/op/QNNCastTypeOp.hpp"
 #include "mllm/backends/qnn/op/QNNElewiseOp.hpp"
@@ -116,6 +118,23 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
                QNNParamOpFactory, QNNSiLUOpFactory, QNNEmbeddingOpFactory>();
 
   QnnLog_Level_t qnnLogLevel = QNN_LOG_LEVEL_ERROR;  // default QNN log level
+  // Allow raising the QNN/HTP backend log verbosity without recompiling, so the
+  // cDSP skel's PD-accounting lines (e.g. "context size estimate <bytes>",
+  // "Failed to find available PD") can be captured on stdout for diagnostics.
+  if (const char* lvl = std::getenv("MLLM_QNN_LOG_LEVEL")) {
+    std::string s(lvl);
+    if (s == "VERBOSE") {
+      qnnLogLevel = QNN_LOG_LEVEL_VERBOSE;
+    } else if (s == "DEBUG") {
+      qnnLogLevel = QNN_LOG_LEVEL_DEBUG;
+    } else if (s == "INFO") {
+      qnnLogLevel = QNN_LOG_LEVEL_INFO;
+    } else if (s == "WARN") {
+      qnnLogLevel = QNN_LOG_LEVEL_WARN;
+    } else if (s == "ERROR") {
+      qnnLogLevel = QNN_LOG_LEVEL_ERROR;
+    }
+  }
   // Per-op profiling is opt-in via the environment so the in-process qnn_profile.csv
   // (per-QNN-op NODE cycle counts) can be obtained without recompiling. DETAILED also
   // enables QNN's richer event set; BASIC gives coarse graph-level timings.
@@ -195,8 +214,15 @@ QNNBackend::~QNNBackend() {
   perf_.reset();
 
   // 4. Cleanup runtime - frees QNN backend/device handles
-  runtime_->qnnInterface.contextFree(context_, nullptr);
-  context_ = nullptr;
+  if (!group_contexts_.empty()) {
+    // Multi-context (grouped-bin) model: free every bin's context.
+    for (auto ctx : group_contexts_) { runtime_->qnnInterface.contextFree(ctx, nullptr); }
+    group_contexts_.clear();
+    context_ = nullptr;
+  } else {
+    runtime_->qnnInterface.contextFree(context_, nullptr);
+    context_ = nullptr;
+  }
   runtime_.reset();
 
   // 5. Reset allocator - will dlclose libcdsprpc.so since shutdown() was already called
@@ -688,6 +714,72 @@ void QNNBackend::endAuxContext() {
   MLLM_INFO("endAuxContext: model context restored (aux context retained for execute)");
 }
 
+int QNNBackend::loadBinsOneGroup(const std::vector<std::string>& bins, uint64_t sf_mb) {
+  const uint64_t sf_bytes = sf_mb * 1024ull * 1024ull;
+
+  // Best-effort per-context HTP size readback (may be UNSUPPORTED on V79).
+  auto logHtpSizes = [&](int idx, Qnn_ContextHandle_t ctx) {
+    if (runtime_->qnnInterface.contextGetProperty == nullptr) { return; }
+    auto query = [&](QnnHtpContext_GetPropertyOption_t opt, const char* name) {
+      QnnHtpContext_CustomProperty_t htpProp;
+      htpProp.option = opt;
+      QnnContext_Property_t prop;
+      prop.option = QNN_CONTEXT_PROPERTY_OPTION_CUSTOM;
+      prop.customProperty = static_cast<QnnContext_CustomProperty_t>(&htpProp);
+      QnnContext_Property_t* props[2] = {&prop, nullptr};
+      Qnn_ErrorHandle_t e = runtime_->qnnInterface.contextGetProperty(ctx, props);
+      if (e == QNN_SUCCESS) {
+        uint64_t v = htpProp.weightsBufferSize;  // union: weights/spillfill alias the same u64
+        MLLM_WARN("PD_POOL: bin[{}] {} = {} bytes ({} MB)", idx, name, v, v / 1024 / 1024);
+      }
+    };
+    query(QNN_HTP_CONTEXT_GET_PROP_WEIGHTS_BUFFER_SIZE, "weightsBufferSize");
+    query(QNN_HTP_CONTEXT_GET_PROP_MAX_SPILLFILL_BUFFER_SIZE, "spillfillBufferSize");
+  };
+
+  // Keep all loaded contexts alive for the whole sweep so they stay co-resident
+  // and we measure the GROUP's total PD capacity. Each retrieveContext reserves
+  // its own PD at contextCreateFromBinary; bins[0] anchors a new group
+  // (firstGroupHandle=0), the rest JOIN it (firstGroupHandle=anchor) to share the
+  // single spill-fill buffer.
+  std::vector<Qnn_ContextHandle_t> handles;
+  std::vector<std::vector<std::shared_ptr<QNNModel>>> modelSets;
+  Qnn_ContextHandle_t anchor = nullptr;
+  int loaded = 0;
+
+  for (size_t i = 0; i < bins.size(); ++i) {
+    QnnHtpContext_CustomConfig_t sf_custom;
+    sf_custom.option = QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_MULTI_CONTEXTS;
+    sf_custom.groupRegistration.firstGroupHandle = (i == 0) ? 0 : anchor;  // anchor = new group; rest join
+    sf_custom.groupRegistration.maxSpillFillBuffer = sf_bytes;
+    QnnContext_Config_t sf_cfg;
+    sf_cfg.option = QNN_CONTEXT_CONFIG_OPTION_CUSTOM;
+    sf_cfg.customConfig = static_cast<QnnContext_CustomConfig_t>(&sf_custom);
+    QnnContext_Config_t* cfgs[2] = {&sf_cfg, nullptr};
+
+    Qnn_ContextHandle_t ctx = nullptr;
+    modelSets.emplace_back();
+    MLLM_WARN("PD_POOL: loading bin[{}] ({}, firstGroupHandle={}, sf={} MB): {}", i, (i == 0) ? "anchor" : "joiner",
+              (i == 0) ? "0" : "anchor", sf_mb, bins[i]);
+    bool ok = runtime_->retrieveContext(bins[i], ctx, modelSets.back(), cfgs);
+    MLLM_WARN("PD_POOL: bin[{}] load {} (handle={}, graphs={})", i, ok ? "OK" : "FAILED", static_cast<void*>(ctx),
+              modelSets.back().size());
+    if (!ok) {
+      MLLM_ERROR("PD_POOL: bin[{}] FAILED to reserve PD — group held {} co-resident weight-bearing bins before overflow",
+                 i, loaded);
+      break;
+    }
+    if (i == 0) { anchor = ctx; }
+    handles.push_back(ctx);
+    logHtpSizes(static_cast<int>(i), ctx);
+    ++loaded;
+  }
+
+  MLLM_WARN("PD_POOL_PROOF requested={} loaded={} sf_mb={}", bins.size(), loaded, sf_mb);
+  context_ = handles.empty() ? nullptr : handles.front();  // one valid handle for orderly teardown
+  return loaded;
+}
+
 bool QNNBackend::loadContext(const std::string& contextPath) {
   // Optionally enable a SHARED spill-fill buffer across all graphs in this
   // context, gated by env var MLLM_QNN_SPILLFILL_MB (megabytes; unset/0 = off).
@@ -728,6 +820,67 @@ bool QNNBackend::loadContext(const std::string& contextPath) {
   }
   // init QNN Allocator
   static_pointer_cast<QNNAllocator>(allocator_)->setQNNPointer(runtime_->qnnInterface, context_);
+  return true;
+}
+
+bool QNNBackend::loadContextGroup(const std::vector<std::string>& contextPaths) {
+  if (contextPaths.empty()) {
+    MLLM_ERROR("loadContextGroup: no context paths given");
+    return false;
+  }
+  if (contextPaths.size() == 1) { return loadContext(contextPaths[0]); }
+
+  // Group registration requires a spill-fill buffer size; default 128 MB. The
+  // first bin registers a NEW group (firstGroupHandle=0); the rest JOIN it so
+  // the whole model shares one spill-fill buffer.
+  uint64_t sf_mb = 128;
+  if (const char* e = std::getenv("MLLM_QNN_SPILLFILL_MB")) {
+    uint64_t v = std::strtoull(e, nullptr, 10);
+    if (v > 0) { sf_mb = v; }
+  }
+  const uint64_t sf_bytes = sf_mb * 1024ull * 1024ull;
+
+  Qnn_ContextHandle_t anchor = nullptr;
+  for (size_t i = 0; i < contextPaths.size(); ++i) {
+    QnnHtpContext_CustomConfig_t sf_custom;
+    sf_custom.option = QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_MULTI_CONTEXTS;
+    sf_custom.groupRegistration.firstGroupHandle = (i == 0) ? 0 : anchor;  // anchor = new group; rest join
+    sf_custom.groupRegistration.maxSpillFillBuffer = sf_bytes;
+    QnnContext_Config_t sf_cfg;
+    sf_cfg.option = QNN_CONTEXT_CONFIG_OPTION_CUSTOM;
+    sf_cfg.customConfig = static_cast<QnnContext_CustomConfig_t>(&sf_custom);
+    QnnContext_Config_t* cfgs[2] = {&sf_cfg, nullptr};
+
+    Qnn_ContextHandle_t ctx = nullptr;
+    std::vector<std::shared_ptr<QNNModel>> models;
+    if (!runtime_->retrieveContext(contextPaths[i], ctx, models, cfgs)) {
+      MLLM_ERROR("loadContextGroup: failed to load bin {} ({})", i, contextPaths[i]);
+      return false;
+    }
+    if (i == 0) {
+      anchor = ctx;
+      context_ = ctx;  // default current context (graphExecute switches per graph)
+    }
+    group_contexts_.push_back(ctx);
+
+    // Merge this bin's graphs into the shared index map. Graph names are unique
+    // across bins (each chunk/attn lives in exactly one context).
+    for (auto& m : models) {
+      const std::string gname = m->getQnnGraphName();
+      if (qnnModelIndexMap_.count(gname)) {
+        MLLM_ERROR("loadContextGroup: duplicate graph name '{}' across bins", gname);
+        return false;
+      }
+      const int idx = static_cast<int>(qnnModels_.size());
+      qnnModels_.push_back(m);
+      qnnModelIndexMap_.insert({gname, idx});
+    }
+    MLLM_INFO("loadContextGroup: bin {} ({}) loaded {} graphs into context {}", i, contextPaths[i], models.size(),
+              static_cast<void*>(ctx));
+  }
+
+  static_pointer_cast<QNNAllocator>(allocator_)->setQNNPointer(runtime_->qnnInterface, context_);
+  MLLM_INFO("loadContextGroup: {} bins, {} total graphs", contextPaths.size(), qnnModels_.size());
   return true;
 }
 
@@ -842,6 +995,15 @@ void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>&
   }
   auto model = qnnModels_[it->second];
 
+  // Multi-context (grouped-bin) routing: point the allocator at THIS graph's
+  // owning context so its I/O buffers are memRegister'd against the right
+  // context. Seam buffers shared between two bins thus get a memHandle per
+  // context (cache keyed by (ptr,context)). For a single-context model this
+  // sets the same context every call — a no-op.
+  if (model->getContext() != nullptr) {
+    static_pointer_cast<QNNAllocator>(allocator_)->setQNNPointer(runtime_->qnnInterface, model->getContext());
+  }
+
   // Validate input size matches expected input count
   if (inputs.size() != model->getGraphInputTensorWrappers().size()) {
     MLLM_ERROR("Input size mismatch: expected {}, got {} for graph '{}'", model->getGraphInputTensorWrappers().size(),
@@ -872,28 +1034,59 @@ void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>&
     wrapper->alloc();
     qnn_inputs.push_back(*(wrapper->getNativeTensor()));
   }
-  // Prepare QNN outputs
-  for (int j = 0; j < model->getGraphOutputTensorWrappers().size(); j++) {
-    auto wrapper = model->getGraphOutputTensorWrappers()[j];
-    auto& wrapper_tensor = wrapper->getDataContainer();
-    const auto& runtime_output = outputs[j];
-
-    // Validate output tensors
-    if (runtime_output.isNil()) {
-      MLLM_ERROR("Output tensor {} is nil for graph '{}'", j, graphName);
-      return;
+  // Debug dump: with a context finalized under MLLM_QNN_DEBUG_ALL_READ, every
+  // intermediate is APP_READ. Self-allocate+bind all of them (build a container from
+  // the QNN dims/dtype since context wrappers carry none) and dump each tensor's
+  // finiteness/range. Needs a high `ulimit -n` (each shared buffer = a dmabuf fd).
+  const bool dbg_dump = std::getenv("MLLM_QNN_DEBUG_DUMP") != nullptr;
+  auto out_wrappers = model->getGraphOutputTensorWrappers();
+  for (int j = 0; j < (int)out_wrappers.size(); j++) {
+    auto wrapper = out_wrappers[j];
+    if (dbg_dump) {
+      if (!wrapper->isAlloc()) {
+        auto nt = wrapper->getNativeTensor();
+        uint32_t rank = QNN_TENSOR_GET_RANK(nt);
+        std::vector<int32_t> dims;
+        for (uint32_t i = 0; i < rank; ++i) dims.push_back((int32_t)QNN_TENSOR_GET_DIMENSIONS(nt)[i]);
+        DataTypes mdt;
+        switch (QNN_TENSOR_GET_DATA_TYPE(nt)) {
+          case QNN_DATATYPE_FLOAT_32: mdt = kFloat32; break;
+          case QNN_DATATYPE_INT_32: case QNN_DATATYPE_UINT_32: mdt = kInt32; break;
+          case QNN_DATATYPE_UFIXED_POINT_16: case QNN_DATATYPE_SFIXED_POINT_16: mdt = kUInt16; break;
+          case QNN_DATATYPE_SFIXED_POINT_8: case QNN_DATATYPE_UFIXED_POINT_8: mdt = kUInt8; break;
+          default: mdt = kFloat16; break;
+        }
+        wrapper->__setDataContainer(Tensor::empty(dims, mdt, kQNN));
+      }
+      wrapper->alloc();
+    } else {
+      const auto& runtime_output = outputs[j];
+      if (runtime_output.isNil()) {
+        MLLM_ERROR("Output tensor {} is nil for graph '{}'", j, graphName);
+        return;
+      }
+      if (!wrapper->isAlloc()) { wrapper->__setDataContainer(runtime_output); }
+      wrapper->alloc();  // QNNAllocator will handle registered memory descriptor
     }
-
-    // output wrapper is empty, set wrapper's dataContainer(mllm::Tensor)
-    if (!wrapper->isAlloc()) { wrapper->__setDataContainer(runtime_output); }
-
-    // alloc and register qnn tensor
-    wrapper->alloc();  // QNNAllocator will handle registered memory descriptor
     qnn_outputs.push_back(*(wrapper->getNativeTensor()));
   }
 
   CALL_QNN(runtime_->qnnInterface.graphExecute(model->getQnnGraph(), qnn_inputs.data(), qnn_inputs.size(), qnn_outputs.data(),
                                                qnn_outputs.size(), runtime_->profileHandle, nullptr));
+
+  if (dbg_dump) {
+    for (auto& w : out_wrappers) {
+      auto& t = w->getDataContainer();
+      int64_t n = t.numel();
+      double mn = 1e300, mx = -1e300;
+      bool bad = false;
+      auto acc = [&](float v) { if (!std::isfinite(v)) bad = true; else { mn = std::min(mn, (double)v); mx = std::max(mx, (double)v); } };
+      if (t.dtype() == kFloat16) { auto p = t.ptr<mllm_fp16_t>(); for (int64_t i = 0; i < n; ++i) acc((float)p[i]); }
+      else if (t.dtype() == kFloat32) { auto p = t.ptr<float>(); for (int64_t i = 0; i < n; ++i) acc(p[i]); }
+      else { continue; }
+      MLLM_INFO("[qdump] {} numel={} {} min={:.5f} max={:.5f}", w->getName(), n, bad ? "*** NONFINITE ***" : "", mn, mx);
+    }
+  }
 
   if (ProfilingLevel::OFF != profilingLevel_) { extractBackendProfilingInfo(runtime_->profileHandle); }
 }

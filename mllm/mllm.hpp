@@ -199,6 +199,11 @@ bool isQnnAvailable();
 
 extern void initQnnBackend(const std::string& context_path = "qnn_context.bin");
 
+// Multi-context (grouped-bin) init: load several .bin context partitions of one
+// model as a single spill-fill group (multi-context split). A single-element
+// list behaves like initQnnBackend. See QNNBackend::loadContextGroup.
+extern void initQnnBackendGroup(const std::vector<std::string>& context_paths);
+
 void cleanThisThread();
 
 SessionTCB::ptr_t thisThread();

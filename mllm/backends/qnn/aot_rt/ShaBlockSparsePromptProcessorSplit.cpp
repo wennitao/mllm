@@ -15,9 +15,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <future>
+#include <omp.h>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -67,6 +69,14 @@ ShaBlockSparsePromptProcessorSplit::ShaBlockSparsePromptProcessorSplit(KVCacheMa
     attns_.push_back(std::make_unique<QnnAOTModule>("attn_" + std::to_string(i)));
     attns_.back()->to(kQNN);
   }
+  tile_mlp_ = std::getenv("MLLM_TILE_MLP") != nullptr;  // must match the compiled .bin
+  if (tile_mlp_) {
+    mlps_.reserve(L_);
+    for (int i = 0; i < L_; ++i) {
+      mlps_.push_back(std::make_unique<QnnAOTModule>("mlp_" + std::to_string(i)));  // o_proj+resid+norm+MLP, ×2 halves
+      mlps_.back()->to(kQNN);
+    }
+  }
 }
 
 ShaBlockSparsePromptProcessorSplit::~ShaBlockSparsePromptProcessorSplit() {
@@ -76,6 +86,12 @@ ShaBlockSparsePromptProcessorSplit::~ShaBlockSparsePromptProcessorSplit() {
     if (m) m->setOutputTensors({});
   }
   for (auto& m : attns_) {
+    if (m) m->setOutputTensors({});
+  }
+  for (auto& m : postnorms_) {
+    if (m) m->setOutputTensors({});
+  }
+  for (auto& m : mlps_) {
     if (m) m->setOutputTensors({});
   }
   chunk_in_.clear();
@@ -156,6 +172,25 @@ void ShaBlockSparsePromptProcessorSplit::init_io() {
     attn_output_full_.push_back(t_ao);
   }
 
+  // Chunk-tile: mid chunks compiled at Sq/2, dispatched ×2. Per half: res_half +
+  // attn_half + pos_half → res2_half + q/kc/vc_half, joined into *_full. 58 graphs.
+  if (tile_mlp_) {
+    const int half = Sq_ / 2;
+    // Single fixed I/O buffers: QNN binds graph I/O on first dispatch only, so
+    // the ×2 half-dispatch refills these in place (bind-once, like the serial
+    // attn slot). Two buffers + resetGraphIOForRebind repointed only outputs,
+    // leaving inputs stuck on slot 0 → half-1 ran half-0's tokens.
+    for (int s = 0; s < 1; ++s) {
+      mlp_in_half_.push_back(Tensor::empty({1, half, hidden_}, kFloat16, kQNN).alloc().setName("res_half" + std::to_string(s)));
+      attn_half_.push_back(Tensor::empty({1, Hq_, half, D_}, kFloat16, kQNN).alloc().setName("attn_half" + std::to_string(s)));
+      res2_half_.push_back(Tensor::empty({1, half, hidden_}, kFloat16, kQNN).alloc().setName("res2_half" + std::to_string(s)));
+    }
+    pos_half_ = Tensor::empty({1, half}, kInt32, kQNN).alloc(); pos_half_.setName("position_half");
+    q_half_  = Tensor::empty({1, Hq_, half, D_}, kUInt16, kQNN).alloc(); q_half_.setName("q_half");
+    kc_half_ = Tensor::empty({1, Hkv_, D_, half}, kUInt8, kQNN).alloc(); kc_half_.setName("kc_half");
+    vc_half_ = Tensor::empty({1, Hkv_, half, D_}, kUInt8, kQNN).alloc(); vc_half_.setName("vc_half");
+  }
+
   // ----- per-qb staging buffers, DOUBLE-BUFFERED (2 slots) -----------------
   q_qb_.clear();
   k_curr_qb_.clear();
@@ -205,21 +240,32 @@ void ShaBlockSparsePromptProcessorSplit::init_io() {
   chunk_in_[0]  = {input_ids_, position_ids_};
   chunk_out_[0] = {residual_full_[0], q_full_[0], k_curr_full_[0], v_curr_full_[0]};
 
-  // chunk_i (1..L-1): inputs = [R_{i-1}, attn_output, position_ids];
-  //                   outputs = [R_i, q, k_curr, v_curr]
+  // chunk_{i+1} (combine+pre, 1..L-1): inputs = [residual2, mlp_out, position_ids];
+  //   outputs = [R_{i+1}, q, k_curr, v_curr]. residual2/mlp_out are produced by
+  //   layer i's postnorm + mlp; chunk reassembles and runs pre_{i+1}.
+  // tiled: chunk reads residual2+mlp_out (postnorm/mlp run between). fused: chunk
+  // reads R_{i-1}+attn_output and runs MLP inline.
+  // Fused wiring; tiled binds chunk I/O inline per half-dispatch.
   for (int i = 1; i < L_; ++i) {
     chunk_in_[i]  = {residual_full_[(i - 1) % 2], attn_output_full_[0], position_ids_};
     chunk_out_[i] = {residual_full_[i % 2], q_full_[0], k_curr_full_[0], v_curr_full_[0]};
   }
-  // chunk_L: inputs = [R_{L-1}, attn_output, last_token_index]; outputs = [logits]
   chunk_in_[L_]  = {residual_full_[(L_ - 1) % 2], attn_output_full_[0], last_token_index_};
   chunk_out_[L_] = {logits_};
+
+  // mlp_i dispatched ×2 over halves, bound at dispatch time.
+  // mlp dispatches use the half staging buffers; bound at dispatch time.
 
   // attn_i I/O is built per dispatch from the active double-buffer slot (see
   // dispatch_attn in prefill), so attn_in_/attn_out_ aren't pre-populated here.
 
   // Bind chunk output tensors (QnnAOTModule fills output_tensors_ on execute).
   for (int i = 0; i <= L_; ++i) chunks_[i]->setOutputTensors(chunk_out_[i]);
+
+  // tiled MLP dispatches the same mlp_i graph twice over disjoint halves → needs rebind.
+  if (tile_mlp_ && !qnn_backend_) {
+    qnn_backend_ = std::static_pointer_cast<mllm::qnn::QNNBackend>(Context::instance().getBackend(kQNN)).get();
+  }
 
   // ----- NPU block-selection scoring graph (opt-in, needs baked "score") -----
   npu_score_ = std::getenv("MLLM_BLOCKSEL_NPU") != nullptr;
@@ -626,6 +672,28 @@ void ShaBlockSparsePromptProcessorSplit::selectTopKBlocks(int layer, int qb_glob
     }
   }
 
+  // Probe: MLLM_DUMP_SEL_ALL=<path> appends every (layer,qb,head) final selection
+  // as CSV so we can measure cross-layer / cross-qb / cross-head overlap of the 5
+  // score-selected middle slots (score-skip / delta-gather viability). Only the
+  // active-selection path (qb_global > n_hist) reaches here. Run with the pipeline
+  // OFF (unset MLLM_SPLIT_PIPELINE) so selections are written serially.
+  if (const char* path = std::getenv("MLLM_DUMP_SEL_ALL")) {
+    static FILE* f = nullptr;
+    if (!f) {
+      f = fopen(path, "w");
+      if (f) fprintf(f, "layer,qb,head,s0,s1,s2,s3,s4,s5,s6\n");
+    }
+    if (f) {
+      for (int h = 0; h < Hq_; ++h) {
+        const int* hs = sel.data() + (size_t)h * n_hist;
+        fprintf(f, "%d,%d,%d", layer, qb_global, h);
+        for (int s = 0; s < n_hist; ++s) fprintf(f, ",%d", hs[s]);
+        fprintf(f, "\n");
+      }
+      fflush(f);
+    }
+  }
+
   // Debug: MLLM_DUMP_SEL=<qb> dumps layer-0 head-0 block scores + selected
   // historical blocks for that query block, so we can see whether the needle
   // block is being ranked/selected.
@@ -833,6 +901,21 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
   MLLM_RT_ASSERT(num_tokens > 0 && num_tokens <= Sq_);
   MLLM_INFO("ShaBlockSparsePromptProcessorSplit: prefill num_tokens={} Sq={} num_qb={}", num_tokens, Sq_, num_qb_);
 
+  // ---- Core partitioning: pin the MAIN thread (and thus its OMP pool, which
+  // inherits this affinity when OMP_PROC_BIND is unset) to a core subset that
+  // EXCLUDES the prep worker's cores, so main's chunk/kc OMP regions can't
+  // invade and deschedule the pinned worker (the source of the per-layer jitter
+  // spikes in V2). Set MLLM_SPLIT_MAIN_CPUS (e.g. "0,1,2,3,4,5") with the worker
+  // on the complementary cores (MLLM_PIPELINE_WORKER_CPUS="6,7"). Pinned here,
+  // before any OMP region runs, so the lazily-created OMP team inherits it.
+  if (const char* e = std::getenv("MLLM_SPLIT_MAIN_CPUS")) {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    bool any = false;
+    for (const char* p = e; *p;) { CPU_SET(std::atoi(p), &set); any = true; while (*p && *p != ',') ++p; while (*p == ',') ++p; }
+    if (any) sched_setaffinity(0, sizeof(set), &set);
+  }
+
   // ---- fill input_ids + position_ids (padded with 0 past prompt end) ------
   {
     int32_t* ip = input_ids_.ptr<int32_t>();
@@ -895,6 +978,13 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
     const char* e = std::getenv("MLLM_SPLIT_PIPELINE");
     return e && std::atoi(e) != 0;
   }();
+  // V2: worker runs the FULL prep (mask+select+gather+stage) into slot (qb+1)&1
+  // while main dispatches attn(qb) from slot qb&1 — overlapping CPU softmax/pool
+  // AND gather with NPU attn. Per-layer NPU score matmul is hoisted to main.
+  const bool pipeline_v2 = [] {
+    const char* e = std::getenv("MLLM_SPLIT_PIPELINE_V2");
+    return e && std::atoi(e) != 0;
+  }();
 
   // CPU prep for one qb into double-buffer `slot`. selectTopKBlocks needs a
   // per-slot scratch `sel` so the worker (qb+1) and any main-thread prep don't
@@ -902,14 +992,29 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
   // active prep at a time (main does qb=0, then the worker does qb>=1 for the
   // same layer), so no extra locking is needed.
   std::vector<int> sel0, sel1;
+  std::atomic<long> pw_mask_{0}, pw_sel_{0}, pw_gather_{0}, pw_stage_{0};
+  const bool v2_skip_gather = std::getenv("MLLM_V2_SKIP_GATHER") != nullptr;  // diagnostic: drop memory-bound stages
   auto prep_qb = [&](int layer, int qb_global, int slot) {
+    using pclk = std::chrono::high_resolution_clock;
+    auto us = [](const std::chrono::time_point<pclk>& t) {
+      return (long)std::chrono::duration_cast<std::chrono::microseconds>(pclk::now() - t).count();
+    };
     std::vector<int>& sel = (slot == 0) ? sel0 : sel1;
+    auto t0 = pclk::now();
     build_mask(qb_global, slot);
+    pw_mask_ += us(t0);
+    auto t1 = pclk::now();
     selectTopKBlocks(layer, qb_global, sel);
+    pw_sel_ += us(t1);
+    if (v2_skip_gather) return;
+    auto t2 = pclk::now();
     gather_one_qb(layer, qb_global, sel, slot);
+    pw_gather_ += us(t2);
+    auto t3 = pclk::now();
     stage_q_qb(qb_global, slot);
     stage_k_curr_qb(qb_global, slot);
     stage_v_curr_qb(qb_global, slot);
+    pw_stage_ += us(t3);
   };
 
   // ---- Option-2 pipeline split: only the SCORING (selectTopKBlocks, the heavy
@@ -935,6 +1040,12 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
     attns_[layer]->setOutputTensors({attn_output_qb_[slot]});
     (void)(*attns_[layer])(ins);
   };
+  // V2: attn reads an alternating slot each qb → clear bindings first so the
+  // next execute re-binds to this slot (cheap; registration cached).
+  auto dispatch_attn_rebind = [&](int layer, int slot) {
+    qnn_backend_->resetGraphIOForRebind("attn_" + std::to_string(layer));
+    dispatch_attn(layer, slot);
+  };
 
   // Persistent prep worker for the pipeline (created once, not per qb — a fresh
   // std::async per qb costs more than the overlap saves). Single-slot handoff:
@@ -944,7 +1055,7 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
   bool pp_has_job = false, pp_done = true, pp_stop = false;
   int pp_l = 0, pp_q = 0, pp_s = 0;
   std::thread pp_worker;
-  if (pipeline) {
+  if (pipeline || pipeline_v2) {
     pp_worker = std::thread([&] {
       // Pin the prep worker to the prime cores (configurable via
       // MLLM_PIPELINE_WORKER_CPUS, e.g. "6,7"). Default {6,7}: on SM8750 those
@@ -962,6 +1073,13 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
         }
         if (any) sched_setaffinity(0, sizeof(set), &set);
       }
+      // MLLM_V2_WORKER_NOOMP: force this worker thread's OMP regions (the
+      // softmax/pool in selectTopKBlocks→computeBlockScores) to single-thread.
+      // omp_set_num_threads sets the per-thread nthreads ICV, so it only affects
+      // regions ENTERED BY THIS THREAD — main's chunk OMP is untouched. Tests
+      // whether the worker's OMP fork/join (from a non-main, 2-core-pinned
+      // thread) is the source of the pp_wait variance.
+      if (std::getenv("MLLM_V2_WORKER_NOOMP")) { omp_set_num_threads(1); }
       for (;;) {
         int l, q, s;
         {
@@ -970,7 +1088,11 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
           if (pp_stop) return;
           l = pp_l; q = pp_q; s = pp_s; pp_has_job = false;
         }
-        score_qb(l, q, s);  // worker does ONLY scoring → sel[s] (option 2)
+        if (pipeline_v2) {
+          prep_qb(l, q, s);   // V2: worker does FULL prep (select+gather+stage) → slot s
+        } else {
+          score_qb(l, q, s);  // V1: worker does ONLY scoring → sel[s] (option 2)
+        }
         {
           std::lock_guard<std::mutex> lk(pp_mtx);
           pp_done = true;
@@ -993,9 +1115,34 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
   // Timing accumulators (µs, summed over all layers/qbs) — printed if
   // MLLM_SPLIT_PIPELINE_TIMING is set. prep = CPU gather/stage (main or worker),
   // disp = NPU attn dispatch (main), wait = main blocked in pp_wait for worker.
-  long tp_prep_ = 0, tp_disp_ = 0, tp_wait_ = 0;
+  long tp_prep_ = 0, tp_disp_ = 0, tp_wait_ = 0, tp_chunk_ = 0, tp_copy_ = 0;
+  // Per-layer wall time (whole iteration: copy_kv + attn qb-loop + chunk_{i+1}),
+  // printed under MLLM_SPLIT_LAYER_TIMING. Reveals thermal ramp / per-layer
+  // outliers that the summed tp_* counters hide.
+  std::vector<long> layer_us_(L_, 0);
+
+  // Tiled-vs-fused parity tap: dump the FULL chunk-output buffers (residual2,
+  // q/k/v) joined from the two half-dispatches (tiled) or written whole (fused)
+  // so the two .bins can be byte-diffed on layer MLLM_DUMP_OUT_LAYER. Joins make
+  // i+1<L the only meaningful case (final emits logits). Tiled & fused share
+  // these buffers, so identical files = correct plumbing.
+  auto dump_chunk_out = [&](int i) {
+    const char* ol = std::getenv("MLLM_DUMP_OUT_LAYER");
+    if (!ol || std::atoi(ol) != i || i + 1 >= L_) return;
+    auto wr = [](const char* path, Tensor t, size_t n, size_t es) {
+      if (!path) return; auto c = t.to(kCPU); FILE* f = std::fopen(path, "wb");
+      if (f) { std::fwrite(c.ptr<char>(), es, n, f); std::fclose(f); }
+    };
+    wr(std::getenv("MLLM_DUMP_OUT_RES"), residual_full_[(i + 1) % 2], (size_t)Sq_ * hidden_, 2);
+    wr(std::getenv("MLLM_DUMP_OUT_Q"),   q_full_[0],      (size_t)Hq_ * Sq_ * D_, 2);
+    wr(std::getenv("MLLM_DUMP_OUT_K"),   k_curr_full_[0], (size_t)Hkv_ * D_ * Sq_, 1);
+    wr(std::getenv("MLLM_DUMP_OUT_V"),   v_curr_full_[0], (size_t)Hkv_ * Sq_ * D_, 1);
+    MLLM_INFO("[dump_out] layer={} res/q/k/v full buffers written", i);
+  };
 
   for (int i = 0; i < L_; ++i) {
+    const auto layer_t0 = std::chrono::high_resolution_clock::now();
+    const auto copy_t0 = layer_t0;
     // Commit this layer's full-Sq K/V into the cache BEFORE the per-qb loop
     // so per-qb gathers for qb >= 1 see freshly-computed K/V at positions
     // 0 .. (qb*BQ - 1) instead of stale/uninitialised cache bytes. The
@@ -1003,10 +1150,37 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
     // out of the cache; that range overlaps THIS prefill's tokens, so the
     // commit must precede the gather.
     copy_kv_to_cache(i, /*base_pos=*/start_pos, /*n_tokens=*/num_tokens);
+    tp_copy_ += (long)std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - copy_t0).count();
 
     using clk = std::chrono::high_resolution_clock;
     auto now_us = [] { return std::chrono::duration_cast<std::chrono::microseconds>(clk::now().time_since_epoch()).count(); };
-    if (pipeline) {
+    if (pipeline_v2) {
+      // V2: hoist the per-layer NPU score matmul (+ kc on all cores) to main so
+      // it doesn't contend with NPU attn / run on the 2-core worker. The worker
+      // then FULL-preps slot (qb+1)&1 (select softmax/pool + gather + stage) while
+      // main dispatches attn(qb) from slot qb&1 (rebind for the alternating slot).
+      // Hoisting computeLayerLogits to main runs its kc-build OMP on the main
+      // thread, whose OMP team invades the worker's pinned cores (6,7) and
+      // deschedules it → per-layer jitter spikes. MLLM_V2_NO_HOIST keeps it lazy
+      // (runs on the worker inside selectTopKBlocks, confined to the worker's
+      // cores like V1) so main does NO OMP during the qb-loop.
+      if (score_based_ && (npu_score_ || std::getenv("MLLM_BLOCKSEL_BIGM")) && !std::getenv("MLLM_V2_NO_HOIST")) {
+        computeLayerLogits(i);
+      }
+      auto t0 = now_us();
+      prep_qb(i, /*qb_global=*/0, /*slot=*/0);  // prime qb0 fully on main → slot 0
+      tp_prep_ += now_us() - t0;
+      for (int qb = 0; qb < num_qb_; ++qb) {
+        const int cur = qb & 1;
+        if (qb + 1 < num_qb_) pp_submit(i, qb + 1, (qb + 1) & 1);  // worker FULL-preps slot (qb+1)&1
+        auto td = now_us();
+        dispatch_attn_rebind(i, cur);                             // NPU attn from slot cur (rebind)
+        tp_disp_ += now_us() - td;
+        writeback_attn_output_qb(qb, cur);
+        if (qb + 1 < num_qb_) { auto tw = now_us(); pp_wait(); tp_wait_ += now_us() - tw; }
+      }
+    } else if (pipeline) {
       // Option 2: worker scores sel(qb+1) while main applies (gather+stage) +
       // dispatches attn(qb) into the SINGLE slot-0 buffers. sel is double-buffered
       // (qb&1) so worker(qb+1) and main(qb) don't alias. dispatch is synchronous,
@@ -1088,10 +1262,55 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
       }
     }
 
-    // chunk_{i+1}: post_attn_i + (pre_attn_{i+1} or final norm + lm_head).
+    // tiled: postnorm_i → residual2/mlp_in; 2× MLP; reassemble. fused: skip, chunk does MLP.
+    const auto chunk_t0 = std::chrono::high_resolution_clock::now();
+    // chunk_{i+1}: tiled = compiled Sq/2, dispatched ×2 over token halves (full post+MLP+pre
+    // each, half panel fits VTCM, 58 graphs/PD fits); fused = single Sq dispatch.
+    if (tile_mlp_) {
+      const int h2 = Sq_ / 2; const size_t rh = (size_t)h2 * hidden_, dh = (size_t)h2 * D_;
+      const std::string gc = "chunk_" + std::to_string(i + 1);
+      if (i + 1 < L_) {
+        for (int p = 0; p < 2; ++p) {  // mid chunk ×2 over token halves (each: post+MLP+pre_{i+1})
+          std::memcpy(mlp_in_half_[0].ptr<mllm_fp16_t>(), residual_full_[i % 2].ptr<mllm_fp16_t>() + p * rh, rh * sizeof(mllm_fp16_t));
+          const mllm_fp16_t* ao = attn_output_full_[0].ptr<mllm_fp16_t>(); mllm_fp16_t* ah = attn_half_[0].ptr<mllm_fp16_t>();
+          for (int hd = 0; hd < Hq_; ++hd) std::memcpy(ah + (size_t)hd * dh, ao + (size_t)hd * Sq_ * D_ + p * dh, dh * sizeof(mllm_fp16_t));
+          int32_t* ph = pos_half_.ptr<int32_t>(); for (int t = 0; t < h2; ++t) ph[t] = p * h2 + t;
+          chunks_[i + 1]->setOutputTensors({res2_half_[0], q_half_, kc_half_, vc_half_});
+          std::vector<Tensor> in{mlp_in_half_[0], attn_half_[0], pos_half_}; (void)(*chunks_[i + 1])(in);
+          // join half outputs into full buffers for this layer
+          std::memcpy(residual_full_[(i + 1) % 2].ptr<mllm_fp16_t>() + p * rh, res2_half_[0].ptr<mllm_fp16_t>(), rh * sizeof(mllm_fp16_t));
+          for (int hd = 0; hd < Hq_; ++hd) std::memcpy(q_full_[0].ptr<uint16_t>() + (size_t)hd * Sq_ * D_ + p * dh, q_half_.ptr<uint16_t>() + (size_t)hd * dh, dh * sizeof(uint16_t));
+          for (int hd = 0; hd < Hkv_; ++hd) for (int c = 0; c < D_; ++c) std::memcpy(k_curr_full_[0].ptr<uint8_t>() + ((size_t)hd * D_ + c) * Sq_ + p * h2, kc_half_.ptr<uint8_t>() + ((size_t)hd * D_ + c) * h2, h2);
+          for (int hd = 0; hd < Hkv_; ++hd) std::memcpy(v_curr_full_[0].ptr<uint8_t>() + (size_t)hd * Sq_ * D_ + p * h2 * D_, vc_half_.ptr<uint8_t>() + (size_t)hd * h2 * D_, (size_t)h2 * D_);
+        }
+      } else {  // final: dispatch only the half holding the last token
+        int p = (int)((num_tokens - 1) / h2);
+        std::memcpy(mlp_in_half_[0].ptr<mllm_fp16_t>(), residual_full_[i % 2].ptr<mllm_fp16_t>() + (size_t)p * rh, rh * sizeof(mllm_fp16_t));
+        const mllm_fp16_t* ao = attn_output_full_[0].ptr<mllm_fp16_t>();
+        for (int hd = 0; hd < Hq_; ++hd) std::memcpy(attn_half_[0].ptr<mllm_fp16_t>() + (size_t)hd * dh, ao + (size_t)hd * Sq_ * D_ + (size_t)p * dh, dh * sizeof(mllm_fp16_t));
+        last_token_index_.ptr<int32_t>()[0] = (int32_t)((num_tokens - 1) - p * h2);
+        chunks_[L_]->setOutputTensors({logits_});
+        std::vector<Tensor> in{mlp_in_half_[0], attn_half_[0], last_token_index_}; (void)(*chunks_[L_])(in);
+      }
+      tp_chunk_ += (long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - chunk_t0).count();
+      dump_chunk_out(i);
+      continue;
+    }
     std::vector<Tensor> ins = chunk_in_[i + 1];
     chunk_out_[i + 1] = (*chunks_[i + 1])(ins);
+    dump_chunk_out(i);
+    tp_chunk_ += (long)std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::high_resolution_clock::now() - chunk_t0).count();
     if (i + 1 < L_) dump_layer_kv(i + 1);  // chunk_{i+1} produced layer (i+1)'s K/V
+
+    layer_us_[i] = (long)std::chrono::duration_cast<std::chrono::microseconds>(
+                       std::chrono::high_resolution_clock::now() - layer_t0).count();
+  }
+  if (std::getenv("MLLM_SPLIT_LAYER_TIMING")) {
+    std::string line;
+    long tot = 0;
+    for (int i = 0; i < L_; ++i) { line += " " + std::to_string(layer_us_[i] / 1000) ; tot += layer_us_[i]; }
+    MLLM_INFO("[layer ms] total={} ms  per-layer(ms):{}", tot / 1000, line);
   }
 
   // Stop the pipeline worker.
@@ -1105,8 +1324,12 @@ int64_t ShaBlockSparsePromptProcessorSplit::prefill(const std::vector<int64_t>& 
   }
 
   if (std::getenv("MLLM_SPLIT_PIPELINE_TIMING")) {
-    MLLM_INFO("[split timing] pipeline={} prep(main)={} ms  dispatch={} ms  pp_wait={} ms",
-              pipeline, tp_prep_ / 1000.0, tp_disp_ / 1000.0, tp_wait_ / 1000.0);
+    MLLM_INFO("[split timing] pipeline={} prep(main)={} ms  attn_dispatch={} ms  pp_wait={} ms  "
+              "chunk(QKV/O/MLP)={} ms  copy_kv={} ms",
+              pipeline, tp_prep_ / 1000.0, tp_disp_ / 1000.0, tp_wait_ / 1000.0,
+              tp_chunk_ / 1000.0, tp_copy_ / 1000.0);
+    MLLM_INFO("[prep stages] mask={} ms  select={} ms  gather={} ms  stage(q+k+v)={} ms",
+              pw_mask_.load() / 1000.0, pw_sel_.load() / 1000.0, pw_gather_.load() / 1000.0, pw_stage_.load() / 1000.0);
   }
   if (std::getenv("MLLM_BLOCKSEL_TIMING")) {
     MLLM_INFO("[score timing] total={} ms | kc(K de-transpose)={} ms  prep(Q+K build)={} ms  "

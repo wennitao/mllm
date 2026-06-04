@@ -69,6 +69,11 @@ uint8_t SplitLLMGraphPass::run(const ir::node_ptr_t& op) {
   {
     auto& cfg = AOTCompileContext::getInstance().getConfig();
     auto chunk_name = cfg.value("chunk_graph_name", std::string{});
+    // The multi-context split routes each chunk to context.<k> (default
+    // context.0). This MUST match the context LLM2QnnLoweringPass captures the
+    // chunk's graph into — the visitors read this attr to dispatch their QNN
+    // capture calls, so a mismatch lands tensors in the wrong/missing context.
+    const auto chunk_ctx = cfg.value("chunk_context_name", std::string{"context.0"});
     if (!chunk_name.empty()) {
       MLLM_RT_ASSERT(op->isa_<ir::ModuleOp>());
       auto chunk_subgraph_sym = getCtx()->lookupSymbolTable(chunk_name);
@@ -80,7 +85,7 @@ uint8_t SplitLLMGraphPass::run(const ir::node_ptr_t& op) {
           }
           // Tag every linalg op in the chunk with qnn_graph_name + qnn_context_name.
           // Visitors at rewrite time read these to dispatch QNN capture calls.
-          recursiveAttachGraphNameAndContextName(getCtx(), /*qnn_context_name=*/"context.0",
+          recursiveAttachGraphNameAndContextName(getCtx(), /*qnn_context_name=*/chunk_ctx,
                                                  /*qnn_graph_name=*/chunk_name, chunk_subgraph);
         }
       }

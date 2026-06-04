@@ -40,7 +40,9 @@ MLLM_MAIN({
   std::setvbuf(stderr, nullptr, _IONBF, 0);
 
   auto& help = Argparse::add<bool>("-h|--help").help("Show help message");
-  auto& model_path = Argparse::add<std::string>("-m|--model").help("Path to split context .bin")
+  auto& model_path = Argparse::add<std::string>("-m|--model")
+                         .help("Path to split context .bin, or a COMMA-SEPARATED list of bins for the multi-context "
+                               "split (loaded as one spill-fill group, e.g. a.bin,b.bin)")
                          .def("qwen3-lpbq-sha-blocksparse-causal-split.bin");
   auto& tokenizer_path = Argparse::add<std::string>("-t|--tokenizer").help("Tokenizer path").def("tokenizer.json");
   auto& config_path = Argparse::add<std::string>("-c|--config").help("Model config json").required(true);
@@ -80,7 +82,25 @@ MLLM_MAIN({
     }
   }  // `params` freed here
 
-  mllm::initQnnBackend(model_path.get());
+  // -m may be a comma-separated list of context bins for the multi-context split
+  // (loaded as one spill-fill group). A single path uses the normal init.
+  {
+    const std::string mp = model_path.get();
+    std::vector<std::string> bins;
+    size_t pos = 0;
+    while (true) {
+      size_t c = mp.find(',', pos);
+      bins.push_back(c == std::string::npos ? mp.substr(pos) : mp.substr(pos, c - pos));
+      if (c == std::string::npos) { break; }
+      pos = c + 1;
+    }
+    if (bins.size() == 1) {
+      mllm::initQnnBackend(bins[0]);
+    } else {
+      fmt::print("Multi-context split: loading {} bins as one group\n", bins.size());
+      mllm::initQnnBackendGroup(bins);
+    }
+  }
 
   QnnAOTConfig config;
   config.num_layers          = qwen3_cfg.num_hidden_layers;
