@@ -1,0 +1,17 @@
+[device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=1024
+[kernel] flash_attention_fp16 D=128 Br=4  local_mem=18528 B  max_wg_size=1024
+OPTIMIZED fp16 kernel (ranks 1-4: FA_BC=32 full-lane QK^T, native-half LDS,
+hoisted softmax, half8-vectorized QK^T dot). ~2x over the v1 fp16 baseline
+(prefill_sq_fp16.txt) and ~2x over fp32. See docs/opencl_backend/flash_attention_optimization.md.
+note: S=4096 prefill still trips the Adreno GPU watchdog (TDR); omitted.
+
+prefill     B=1 H=16 D=128  S_q=    2 S_kv=    2  min=   0.234 ms  med=   0.242 ms  mean=   0.303 ms      0.1 GF/s     0.1 GB/s
+prefill     B=1 H=16 D=128  S_q=    4 S_kv=    4  min=   0.264 ms  med=   0.291 ms  mean=   0.332 ms      0.3 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q=    8 S_kv=    8  min=   0.273 ms  med=   0.281 ms  mean=   0.290 ms      1.1 GF/s     0.5 GB/s
+prefill     B=1 H=16 D=128  S_q=   16 S_kv=   16  min=   0.393 ms  med=   0.430 ms  mean=   0.441 ms      2.8 GF/s     0.7 GB/s
+prefill     B=1 H=16 D=128  S_q=   32 S_kv=   32  min=   0.603 ms  med=   0.656 ms  mean=   0.655 ms      7.2 GF/s     0.9 GB/s
+prefill     B=1 H=16 D=128  S_q=   64 S_kv=   64  min=   1.758 ms  med=   1.797 ms  mean=   1.837 ms      9.7 GF/s     0.6 GB/s
+prefill     B=1 H=16 D=128  S_q=  128 S_kv=  128  min=   6.107 ms  med=   6.152 ms  mean=   6.206 ms     11.1 GF/s     0.3 GB/s
+prefill     B=1 H=16 D=128  S_q=  256 S_kv=  256  min=  23.990 ms  med=  24.213 ms  mean=  24.167 ms     11.2 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q= 1024 S_kv= 1024  min= 378.365 ms  med= 378.480 ms  mean= 378.534 ms     11.4 GF/s     0.0 GB/s
+prefill     B=1 H=16 D=128  S_q= 2048 S_kv= 2048  min=1586.447 ms  med=1591.065 ms  mean=1591.710 ms     10.8 GF/s     0.0 GB/s
