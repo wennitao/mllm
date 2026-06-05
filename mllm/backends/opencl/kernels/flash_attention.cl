@@ -211,7 +211,6 @@ __kernel void flash_attention_fp16(
   __local half  K_local[FA_BC_H * FA_D];     // c-major [c*D + d] for the QK^T dot
   __local half  V_localT[FA_D * FA_BC_H];    // TRANSPOSED [d*FA_BC_H + c] for P·V
   __local float S_local[FA_BR_H * FA_BC_H];  // scores (fp32)
-  __local float P_local[FA_BR_H * FA_BC_H];  // exp probs (fp32)
   __local float m_il[FA_BR_H];
   __local float l_il[FA_BR_H];
   __local float sh_a[FA_BR_H];
@@ -296,7 +295,7 @@ __kernel void flash_attention_fp16(
       for (int c = 0; c < FA_BC_H; ++c) {
         const float s = S_local[i * FA_BC_H + c];
         const float p = (s == -INFINITY) ? 0.0f : native_exp(s - m_tilde);
-        P_local[i * FA_BC_H + c] = p;
+        S_local[i * FA_BC_H + c] = p;  // alias: overwrite score with prob (max already taken)
         l_tilde += p;
       }
       const float m_old = m_il[i];
@@ -318,7 +317,7 @@ __kernel void flash_attention_fp16(
     {
       __local const half* vrow = V_localT + t * FA_BC_H;
       for (int i = 0; i < nrows; ++i) {
-        __local const float* prow = P_local + i * FA_BC_H;
+        __local const float* prow = S_local + i * FA_BC_H;
         float8 pv8 = (float8)(0.0f);
         for (int c8 = 0; c8 < FA_BC_H / 8; ++c8) {
           pv8 += vload8(c8, prow) * convert_float8(vload8(c8, vrow));
