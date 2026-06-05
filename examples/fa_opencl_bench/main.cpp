@@ -277,6 +277,10 @@ MLLM_MAIN({
     validate_fp16_vs_fp32({kB, kH, 64, 64, kD, "val"});
     validate_fp16_vs_fp32({kB, kH, 256, 256, kD, "val"});
     validate_fp16_vs_fp32({kB, kH, 1, 512, kD, "val"});
+    // Non-multiples of the row tile (FA_BR_H=8) and key tile (FA_BC_H=32) to
+    // exercise the partial-block paths.
+    validate_fp16_vs_fp32({kB, kH, 130, 130, kD, "val"});
+    validate_fp16_vs_fp32({kB, kH, 100, 250, kD, "val"});
     std::printf("\n");
   }
 

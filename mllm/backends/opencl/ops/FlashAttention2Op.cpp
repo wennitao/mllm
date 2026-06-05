@@ -62,9 +62,12 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
   // Lazy build per head_dim — FA_D macro sizes __local arrays.
   if (built_for_d_ != D) {
     auto runtime = std::static_pointer_cast<OpenCLBackend>(mllm::Context::instance().getBackend(kOpenCL))->runtime();
+    // fp16 kernel processes kBrFp16 q-rows per workgroup (cross-q reuse); fp32
+    // reference uses kBr. The host dispatch below matches each kernel's row count.
     std::set<std::string> opts;
     opts.insert(std::string("-DFA_D=") + std::to_string(D));
     opts.insert(std::string("-DFA_BR=") + std::to_string(kBr));
+    opts.insert(std::string("-DFA_BR_H=") + std::to_string(kBrFp16));
     kernel_fp32_ = runtime->buildKernel("flash_attention", "flash_attention_fp32", opts);
     MLLM_RT_ASSERT(kernel_fp32_);
     kernel_fp16_ = runtime->buildKernel("flash_attention", "flash_attention_fp16", opts);
@@ -136,9 +139,10 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
               nameOfType(Q.dtype()), causal);
   }
 
-  // One work-group per (q_block, batch*head). q_block covers kBr Q rows.
-  // local_size = D (each thread = one d-position; tree reduction across d).
-  const int q_blocks = (S_q + kBr - 1) / kBr;
+  // One work-group per (q_block, batch*head). fp16 covers kBrFp16 rows/wg (the
+  // cross-q-reuse kernel), fp32 covers kBr. local_size = D (one lane per d).
+  const int rows_per_wg = (Q.dtype() == mllm::kFloat16) ? kBrFp16 : kBr;
+  const int q_blocks = (S_q + rows_per_wg - 1) / rows_per_wg;
   cl::NDRange global(D, q_blocks, B * H);
   cl::NDRange local(D, 1, 1);
   auto error = runtime->commandQueue().enqueueNDRangeKernel(kernel->get(), cl::NullRange, global, local);

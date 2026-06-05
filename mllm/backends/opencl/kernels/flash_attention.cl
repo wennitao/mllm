@@ -156,27 +156,29 @@ __kernel void flash_attention_fp32(
 // ---------------------------------------------------------------- fp16 (optimized)
 //
 // Optimized vs the fp32 reference above, applying lessons from the tuned OpenCL
-// GEMM/GEMV kernels (which reach ~1 TF/s on this device). The fp32 kernel is
-// left untouched as the numeric reference for correctness checks.
+// GEMM/GEMV kernels. The fp32 kernel is left untouched as the numeric reference.
 //
-//   rank 1  FA_BC_H = FA_D/FA_BR  → FA_BR*FA_BC_H == FA_D == local size, so ALL
-//           128 lanes compute one S element in QK^T (no t<64 idle gate) AND the
-//           K/V tile doubles (16→32), halving outer-loop barriers.
-//   rank 2  native-half __local storage for Q/K/V/P (the reference widens to
-//           __local float, which is why fp16==fp32 today). Halves LDS traffic
-//           and is the prerequisite for half8 vector loads.
-//   rank 3  hoisted softmax: one producer lane per Q row computes m_tilde, the
-//           exp() row, and l_tilde ONCE into LDS, then all 128 lanes consume it
-//           (today every lane recomputes the BC max + BC exp()s — ~128x waste).
-//   rank 4  half8-vectorized QK^T dot with fp32 accumulation.
+//   FA_BR_H q-rows per workgroup (default 8 — the host must launch q_blocks =
+//   ceil(S_q/FA_BR_H) for fp16); FA_BC_H = FA_D/4 keys per K/V tile. With
+//   FA_BR_H=8, D=128 → FA_BC_H=32 and FA_BR_H*FA_BC_H = 256 = 2*FA_D, so each
+//   of the 128 lanes computes TWO S elements in QK^T (two Q rows i0 and i0+4
+//   sharing column c → the K[c] row is loaded once and reused → cross-q reuse,
+//   and the per-j-iter load+barrier overhead is amortized over 2x the rows).
+//
+//   Other techniques: native-half LDS storage; transposed-V LDS tile for
+//   contiguous vectorized P·V; hoisted producer-lane softmax (native_exp);
+//   half8-vectorized QK^T dot; causal block-skip of fully-masked K/V blocks.
 //
 // PRECISION INVARIANT: storage + multiply operands are half; ALL accumulators
-// (QK^T dot, PV sum, o_priv across the whole S_kv loop) and softmax stats
-// (m, l, a, bb, l_new) stay fp32 — they feed exp(). Requires FA_D % FA_BR == 0.
-// (rank 5 — vectorized P·V with a transposed-V LDS tile — is left for later.)
+// (QK^T dot, P·V sum, o_priv across the whole S_kv loop) and softmax stats
+// (m, l, a, bb, l_new) stay fp32 — they feed exp(). Requires FA_D % 4 == 0 and
+// FA_BR_H*FA_BC_H == 2*FA_D (true for FA_BR_H=8, any D divisible by 4).
 
-#define FA_BC_H (FA_D / FA_BR)            // 32 for D=128, BR=4
-#define FA_S_THREADS_H (FA_BR * FA_BC_H)  // == FA_D == local size → all lanes busy
+#ifndef FA_BR_H
+#define FA_BR_H 8
+#endif
+#define FA_BC_H (FA_D / 4)                  // 32 for D=128
+#define FA_ROWSTEP (FA_D / FA_BC_H)         // 4: i1 = i0 + FA_ROWSTEP
 
 __kernel void flash_attention_fp16(
     __global const half *Q, __global const half *K, __global const half *V,
@@ -186,12 +188,16 @@ __kernel void flash_attention_fp16(
     const int K_b_stride, const int K_h_stride, const int K_s_stride,
     const int V_b_stride, const int V_h_stride, const int V_s_stride,
     const float scale, const int causal_mask) {
-  const int t = get_local_id(0);
+  const int t = get_local_id(0);            // 0..FA_D-1
   const int q_block = get_global_id(1);
   const int bh = get_global_id(2);
   if (bh >= B * H) return;
-  const int q_row_start = q_block * FA_BR;
+  const int q_row_start = q_block * FA_BR_H;
   if (q_row_start >= S_q) return;
+  // Valid rows in this workgroup (< FA_BR_H only for the last block / decode).
+  // A uniform loop bound (not a per-iter `continue`) keeps the compiler's loop
+  // optimization for full blocks while letting decode (S_q=1) skip the waste.
+  const int nrows = min(FA_BR_H, S_q - q_row_start);
 
   const int b = bh / H;
   const int h = bh - b * H;
@@ -200,50 +206,44 @@ __kernel void flash_attention_fp16(
   const int v_h_off = b * V_b_stride + h * V_h_stride;
   const int o_h_off = bh * S_q * D;
 
-  __local half  Q_local[FA_BR * FA_D];
+  __local half  Q_local[FA_BR_H * FA_D];
   __local half  K_local[FA_BC_H * FA_D];     // c-major [c*D + d] for the QK^T dot
-  __local half  V_localT[FA_D * FA_BC_H];    // rank 5: TRANSPOSED [d*FA_BC_H + c]
-                                             // so P·V reads contiguous in c (vload8)
-  __local float S_local[FA_BR * FA_BC_H];   // scores (fp32)
-  __local float P_local[FA_BR * FA_BC_H];   // exp probs, staged for broadcast (fp32)
-  __local float m_il[FA_BR];
-  __local float l_il[FA_BR];
-  __local float sh_a[FA_BR];                 // producer→consumer broadcast
-  __local float sh_bb[FA_BR];
-  __local float sh_lold[FA_BR];
-  __local float sh_lnew[FA_BR];
+  __local half  V_localT[FA_D * FA_BC_H];    // TRANSPOSED [d*FA_BC_H + c] for P·V
+  __local float S_local[FA_BR_H * FA_BC_H];  // scores (fp32)
+  __local float P_local[FA_BR_H * FA_BC_H];  // exp probs (fp32)
+  __local float m_il[FA_BR_H];
+  __local float l_il[FA_BR_H];
+  __local float sh_a[FA_BR_H];
+  __local float sh_bb[FA_BR_H];
+  __local float sh_lold[FA_BR_H];
+  __local float sh_lnew[FA_BR_H];
 
-  // Load Q tile (BR rows × D) — lane t = d-position loads BR elements.
-  for (int i = 0; i < FA_BR; ++i) {
+  for (int i = 0; i < FA_BR_H; ++i) {
     const int q_row = q_row_start + i;
     Q_local[i * FA_D + t] =
         (q_row < S_q) ? Q[q_h_off + q_row * Q_s_stride + t] : (half)0;
   }
-  if (t < FA_BR) {
+  if (t < FA_BR_H) {
     m_il[t] = -INFINITY;
     l_il[t] = 0.0f;
   }
-  float o_priv[FA_BR];
-  for (int i = 0; i < FA_BR; ++i) o_priv[i] = 0.0f;
+  float o_priv[FA_BR_H];
+  for (int i = 0; i < FA_BR_H; ++i) o_priv[i] = 0.0f;
 
   barrier(CLK_LOCAL_MEM_FENCE);
 
-  // Causal block-skip: a q_block's last row attends to keys up to q_pos; any K/V
-  // block starting beyond that is fully masked, so cap the loop instead of
-  // looping all of S_kv and masking. ~2x fewer j-iters on avg for causal prefill.
+  // Causal block-skip: cap the j-loop at this q_block's last diagonal block.
   int j_max = S_kv;
   if (causal_mask) {
-    const int last_q_pos = S_kv - S_q + (q_row_start + FA_BR - 1);
+    const int last_q_pos = S_kv - S_q + (q_row_start + FA_BR_H - 1);
     j_max = min(S_kv, last_q_pos + 1);
   }
+
   for (int j_start = 0; j_start < j_max; j_start += FA_BC_H) {
-    // Load K_j, V_j tiles (BC_H rows) — each lane loads BC_H elements.
     for (int c = 0; c < FA_BC_H; ++c) {
       const int k_row = j_start + c;
       if (k_row < S_kv) {
         K_local[c * FA_D + t] = K[k_h_off + k_row * K_s_stride + t];
-        // Global read coalesced (adjacent lanes t → adjacent addr); LDS write is
-        // transposed (strided once) so the hot P·V read is contiguous in c.
         V_localT[t * FA_BC_H + c] = V[v_h_off + k_row * V_s_stride + t];
       } else {
         K_local[c * FA_D + t] = (half)0;
@@ -252,34 +252,40 @@ __kernel void flash_attention_fp16(
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // QK^T — ALL 128 lanes active: lane t owns S element (i=t/BC_H, c=t%BC_H).
-    // half8 vectorized dot over D, accumulated in fp32.
+    // QK^T — each of the 128 lanes computes TWO S elements: rows i0 and
+    // i0+FA_ROWSTEP at the same column c, sharing the K[c] row load. Invalid
+    // (masked / out-of-range) rows are gated out so partial blocks (e.g. decode
+    // S_q=1 under FA_BR_H=8) don't pay for the wasted rows.
     {
-      const int i = t / FA_BC_H;
-      const int c = t - i * FA_BC_H;
-      __local const half* qrow = Q_local + i * FA_D;
+      const int c = t % FA_BC_H;
+      const int i0 = t / FA_BC_H;
+      const int i1 = i0 + FA_ROWSTEP;
       __local const half* krow = K_local + c * FA_D;
-      float8 accv = (float8)(0.0f);
+      __local const half* q0 = Q_local + i0 * FA_D;
+      __local const half* q1 = Q_local + i1 * FA_D;
+      float8 a0 = (float8)(0.0f);
+      float8 a1 = (float8)(0.0f);
       for (int d8 = 0; d8 < FA_D / 8; ++d8) {
-        accv += convert_float8(vload8(d8, qrow)) * convert_float8(vload8(d8, krow));
+        float8 kf = convert_float8(vload8(d8, krow));
+        a0 += convert_float8(vload8(d8, q0)) * kf;
+        a1 += convert_float8(vload8(d8, q1)) * kf;
       }
-      float acc = accv.s0 + accv.s1 + accv.s2 + accv.s3 +
-                  accv.s4 + accv.s5 + accv.s6 + accv.s7;
-      const int q_row = q_row_start + i;
+      float acc0 = a0.s0 + a0.s1 + a0.s2 + a0.s3 + a0.s4 + a0.s5 + a0.s6 + a0.s7;
+      float acc1 = a1.s0 + a1.s1 + a1.s2 + a1.s3 + a1.s4 + a1.s5 + a1.s6 + a1.s7;
       const int k_row = j_start + c;
-      const int q_pos = S_kv - S_q + q_row;
-      if (q_row >= S_q || k_row >= S_kv || (causal_mask && k_row > q_pos)) {
-        acc = -INFINITY;
-      } else {
-        acc *= scale;
-      }
-      S_local[i * FA_BC_H + c] = acc;
+      const int qr0 = q_row_start + i0;
+      const int qr1 = q_row_start + i1;
+      const int qp0 = S_kv - S_q + qr0;
+      const int qp1 = S_kv - S_q + qr1;
+      S_local[i0 * FA_BC_H + c] =
+          (qr0 >= S_q || k_row >= S_kv || (causal_mask && k_row > qp0)) ? -INFINITY : acc0 * scale;
+      S_local[i1 * FA_BC_H + c] =
+          (qr1 >= S_q || k_row >= S_kv || (causal_mask && k_row > qp1)) ? -INFINITY : acc1 * scale;
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Online softmax — HOISTED: one producer lane per Q row computes the row's
-    // m_tilde / exp() / l_tilde and the merge scalars ONCE, broadcasts via LDS.
-    if (t < FA_BR) {
+    // Online softmax — hoisted: one producer lane per valid Q row.
+    if (t < nrows) {
       const int i = t;
       float m_tilde = -INFINITY;
       for (int c = 0; c < FA_BC_H; ++c) {
@@ -307,12 +313,10 @@ __kernel void flash_attention_fp16(
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // P·V + O rescale — ALL lanes: lane t owns d=t. rank 5: vectorized over c.
-    // P_local[i] is contiguous in c; V_localT[t] (= row d=t) is contiguous in c
-    // after the transpose → both vload8; accumulate in fp32. (FA_BC_H % 8 == 0.)
+    // P·V + O rescale — ALL lanes: lane t owns d=t; FA_BR_H rows, vectorized in c.
     {
       __local const half* vrow = V_localT + t * FA_BC_H;
-      for (int i = 0; i < FA_BR; ++i) {
+      for (int i = 0; i < nrows; ++i) {
         __local const float* prow = P_local + i * FA_BC_H;
         float8 pv8 = (float8)(0.0f);
         for (int c8 = 0; c8 < FA_BC_H / 8; ++c8) {
@@ -329,8 +333,7 @@ __kernel void flash_attention_fp16(
     barrier(CLK_LOCAL_MEM_FENCE);
   }
 
-  for (int i = 0; i < FA_BR; ++i) {
-    const int q_row = q_row_start + i;
-    if (q_row < S_q) { O[o_h_off + q_row * D + t] = (half)o_priv[i]; }
+  for (int i = 0; i < nrows; ++i) {
+    O[o_h_off + (q_row_start + i) * D + t] = (half)o_priv[i];
   }
 }
