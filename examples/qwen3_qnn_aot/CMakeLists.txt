@@ -81,6 +81,27 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   target_link_libraries(mllm-qwen3-aot-mlp-decode-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-aot-mlp-decode-c PRIVATE ${MLLM_INCLUDE_DIR})
 
+  # ---- LFM2.5-8B-A1B (lfm2_moe) NPU AOT compilers ----
+  add_executable(mllm-lfm2-aot-expert-c compile_lfm2_expert.cpp)
+  target_link_libraries(mllm-lfm2-aot-expert-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-lfm2-aot-expert-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-lfm2-aot-moe-block-c compile_lfm2_moe_block.cpp)
+  target_link_libraries(mllm-lfm2-aot-moe-block-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-lfm2-aot-moe-block-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-lfm2-aot-conv-decode-c compile_lfm2_conv_decode.cpp)
+  target_link_libraries(mllm-lfm2-aot-conv-decode-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-lfm2-aot-conv-decode-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-lfm2-aot-attn-decode-c compile_lfm2_attn_decode.cpp)
+  target_link_libraries(mllm-lfm2-aot-attn-decode-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-lfm2-aot-attn-decode-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-lfm2-aot-decode-stack-c compile_lfm2_decode_stack.cpp)
+  target_link_libraries(mllm-lfm2-aot-decode-stack-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-lfm2-aot-decode-stack-c PRIVATE ${MLLM_INCLUDE_DIR})
+
   add_executable(mllm-qwen3-aot-stack-test-c compile_stack_test.cpp)
   target_link_libraries(mllm-qwen3-aot-stack-test-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-aot-stack-test-c PRIVATE ${MLLM_INCLUDE_DIR})
@@ -280,3 +301,20 @@ if(MLLM_BUILD_OPENCL_BACKEND)
     MllmRT MllmCPUBackend MllmOpenCLBackend)
   target_include_directories(mllm-qwen3-fp32-gemm-vc PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
+
+# ---- LFM2.5-8B-A1B (lfm2_moe) NPU on-device runners / validators ----
+add_executable(mllm-lfm2-aot-moe-block-run run_lfm2_moe_block.cpp)
+target_link_libraries(mllm-lfm2-aot-moe-block-run PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-lfm2-aot-moe-block-run PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-lfm2-aot-conv-decode-run run_lfm2_conv_decode.cpp)
+target_link_libraries(mllm-lfm2-aot-conv-decode-run PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-lfm2-aot-conv-decode-run PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-lfm2-aot-attn-decode-run run_lfm2_attn_decode.cpp)
+target_link_libraries(mllm-lfm2-aot-attn-decode-run PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-lfm2-aot-attn-decode-run PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-lfm2-aot-decode-run run_lfm2_decode.cpp)
+target_link_libraries(mllm-lfm2-aot-decode-run PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-lfm2-aot-decode-run PRIVATE ${MLLM_INCLUDE_DIR})
