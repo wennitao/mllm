@@ -1,17 +1,18 @@
-[device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=768
-[kernel] flash_attention_fp16 D=128 Br=4  local_mem=18528 B  max_wg_size=768
-OPTIMIZED fp16 kernel (ranks 1-5: + rank 5 = transposed-V LDS tile + half8-vectorized P*V).
-~1.4x over ranks 1-4 (prefill ~16 GF/s @S=1024), ~2.9x over fp16 v1, ~3x over fp32.
+[device] QUALCOMM Adreno(TM) 830  CUs=12  max_wg=768
+[kernel] flash_attention_fp16 (dual: prefill FA_BR_H=32 / decode FA_BR_H=8)
+OPTIMIZED fp16 (session 2): causal block-skip + native_exp + cross-q reuse
+(BR=32, N S-elems/lane) + transposed-V vectorized P*V + S/P LDS alias + dual
+prefill/decode dispatch. ~6-7x prefill over the rank-5 start; ~106 GF/s @S=2048.
 See docs/opencl_backend/flash_attention_optimization.md.
 note: S=4096 prefill still trips the Adreno GPU watchdog (TDR); omitted.
 
-prefill     B=1 H=16 D=128  S_q=    2 S_kv=    2  min=   0.228 ms  med=   0.357 ms  mean=   0.410 ms      0.1 GF/s     0.1 GB/s
-prefill     B=1 H=16 D=128  S_q=    4 S_kv=    4  min=   0.197 ms  med=   0.412 ms  mean=   0.414 ms      0.4 GF/s     0.3 GB/s
-prefill     B=1 H=16 D=128  S_q=    8 S_kv=    8  min=   0.307 ms  med=   0.490 ms  mean=   0.500 ms      1.0 GF/s     0.4 GB/s
-prefill     B=1 H=16 D=128  S_q=   16 S_kv=   16  min=   0.336 ms  med=   0.371 ms  mean=   0.374 ms      3.3 GF/s     0.8 GB/s
-prefill     B=1 H=16 D=128  S_q=   32 S_kv=   32  min=   0.501 ms  med=   0.536 ms  mean=   0.558 ms      8.6 GF/s     1.0 GB/s
-prefill     B=1 H=16 D=128  S_q=   64 S_kv=   64  min=   1.294 ms  med=   1.324 ms  mean=   1.365 ms     13.2 GF/s     0.8 GB/s
-prefill     B=1 H=16 D=128  S_q=  128 S_kv=  128  min=   4.308 ms  med=   4.337 ms  mean=   4.389 ms     15.7 GF/s     0.5 GB/s
-prefill     B=1 H=16 D=128  S_q=  256 S_kv=  256  min=  16.697 ms  med=  17.077 ms  mean=  17.043 ms     16.1 GF/s     0.3 GB/s
-prefill     B=1 H=16 D=128  S_q= 1024 S_kv= 1024  min= 266.270 ms  med= 266.473 ms  mean= 266.508 ms     16.1 GF/s     0.1 GB/s
-prefill     B=1 H=16 D=128  S_q= 2048 S_kv= 2048  min=1135.903 ms  med=1138.995 ms  mean=1139.445 ms     15.1 GF/s     0.0 GB/s
+prefill     B=1 H=16 D=128  S_q=    2 S_kv=    2  min=   0.261 ms  med=   0.472 ms  mean=   0.470 ms      0.1 GF/s     0.1 GB/s
+prefill     B=1 H=16 D=128  S_q=    4 S_kv=    4  min=   0.161 ms  med=   0.398 ms  mean=   0.398 ms      0.5 GF/s     0.4 GB/s
+prefill     B=1 H=16 D=128  S_q=    8 S_kv=    8  min=   0.277 ms  med=   0.405 ms  mean=   0.454 ms      1.1 GF/s     0.5 GB/s
+prefill     B=1 H=16 D=128  S_q=   16 S_kv=   16  min=   0.241 ms  med=   0.439 ms  mean=   0.470 ms      4.6 GF/s     1.1 GB/s
+prefill     B=1 H=16 D=128  S_q=   32 S_kv=   32  min=   0.352 ms  med=   0.492 ms  mean=   0.550 ms     12.3 GF/s     1.5 GB/s
+prefill     B=1 H=16 D=128  S_q=   64 S_kv=   64  min=   0.554 ms  med=   0.632 ms  mean=   0.669 ms     30.8 GF/s     1.9 GB/s
+prefill     B=1 H=16 D=128  S_q=  128 S_kv=  128  min=   1.181 ms  med=   1.458 ms  mean=   1.437 ms     57.3 GF/s     1.8 GB/s
+prefill     B=1 H=16 D=128  S_q=  256 S_kv=  256  min=   3.293 ms  med=   3.550 ms  mean=   3.538 ms     81.8 GF/s     1.3 GB/s
+prefill     B=1 H=16 D=128  S_q= 1024 S_kv= 1024  min=  42.021 ms  med=  42.591 ms  mean=  42.595 ms    102.3 GF/s     0.4 GB/s
+prefill     B=1 H=16 D=128  S_q= 2048 S_kv= 2048  min= 162.029 ms  med= 162.448 ms  mean= 162.443 ms    106.1 GF/s     0.2 GB/s

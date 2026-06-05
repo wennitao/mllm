@@ -11,6 +11,13 @@ Bench + raw numbers: [examples/fa_opencl_bench/](../../examples/fa_opencl_bench/
 (`FA_DTYPE=fp16|fp32`). Device roofline reference for the matmul side:
 the OpenCL LPBQ work (separate branch).
 
+> **Status (current):** prefill **~102–106 GF/s** @ S≥1024 (≈3.5% of the 3 TF
+> peak), decode neutral. That is **~19× over the fp16 v1 baseline** and ~7× over
+> the session-1 result below. Session 1 (ranks 1–5) reached ~16 GF/s and
+> concluded the rest needed a redesign; **session 2 disproved that** — two
+> structural-but-incremental changes (causal block-skip + cross-q reuse) got to
+> ~100 GF/s with no algorithm change. See "Session 2" below.
+
 ## The key reframe: FA is not slow for the reason GEMM was
 
 The famous GEMM/GEMV wins (texture cache, int4 weight packing, 8×4 register
@@ -98,15 +105,50 @@ GEMM-style register-tiled reuse can be bolted onto without a different algorithm
 (split-K / two-pass, or an HMX dot path). So ~16 GF/s is a reasonable plateau for
 *this* design; the next big step is a redesign, not another incremental rank.
 
+## Session 2 — block-skip + cross-q reuse (16 → 102 GF/s)
+
+Each change measured on device (Adreno 830), committed individually, correctness
+re-checked each step (fp16-vs-fp32 max_abs ≤4.1e-4 incl. partial-block shapes
+S_q=130 / 100×250; no NaN).
+
+| # | Change | Prefill effect | Commit |
+|--:|---|---|---|
+| 1 | **Causal block-skip** — cap the j-loop at the q-block's last diagonal block; the kernel was looping ALL S_kv blocks and masking the upper triangle (~half the work wasted) | 16.2 → 30.2 GF/s (**1.87×**) | `ebb84fd3` |
+| 2 | **native_exp** in the softmax | 30.2 → 32.1 GF/s (1.06×) | `5927ee0e` |
+| 3 | **Cross-q reuse, BR=8** — each workgroup does 8 q-rows (was 4), each lane computes 2 S-elements sharing the K[c] row load; `nrows` uniform bound (not a `continue`) for partial/decode blocks | 32 → 53 GF/s (1.65×) | `d4079673` |
+| 4 | **BR=16** — generalized QK to FA_NSPL S-elements/lane | 53 → 80 GF/s (1.5×) | `79992062` |
+| 5 | **BR=32 + S/P LDS alias** (alias the prob buffer into S_local; frees 4 KB → BR=32 fits the 32 KB ceiling, FA_NSPL=8) | 80 → 102 GF/s (1.28×) | `bb48e9f5` |
+| 6 | **Dual-kernel** — same source compiled BR=32 (prefill) and BR=8 (decode/tiny S_q); op picks by S_q | decode back to baseline (BR=32 alone was −40% at S_q=1) | `0d9fd6d4` |
+
+**Final (min latency):**
+
+| S | rank-5 (start) | session-2 | speedup | GF/s |
+|---:|---:|---:|---:|---:|
+| prefill 128 | 6.11 ms | **1.46 ms** | 4.2× | — |
+| prefill 256 | 16.7 ms | **3.55 ms** | 4.7× | 83 |
+| prefill 1024 | 266 ms | **42.6 ms** | 6.2× | 102 |
+| prefill 2048 | 1136 ms | **162 ms** | 7.0× | ~106 |
+| decode 2048 | 3.98 ms | **3.92 ms** | neutral | — |
+| decode 4096 | 7.87 ms | **7.60 ms** | neutral | — |
+
+**Corrected ceiling read:** session 1 called ~16 GF/s a near-plateau needing a
+redesign — wrong. The dominant cost was *wasted work* (causal upper-triangle
+blocks) and *under-amortized overhead* (load+barriers per j-iter over only 4
+rows), both fixable incrementally. At ~102 GF/s (~3.5% of peak) the kernel is now
+genuinely overhead/issue-bound: 4 barriers/j-iter, a per-lane horizontal QK
+reduction, and the softmax phase running on only FA_BR_H of 128 lanes. The big
+remaining levers do need real work (barrier reduction via K/V double-buffering —
+blocked by the 32 KB LDS budget at BR=32; or an HMX/dot path absent in OpenCL).
+
 ## Next steps (evidence-ranked)
-1. **Per-phase profiling** (QK^T vs softmax vs P·V vs barriers) to find the new
-   dominant phase post-rank-5 and isolate ranks 3/4 (A/B the softmax barrier and
-   the half8 QK dot, which were masked by P·V before).
-2. Rank 6 — vectorized global K/V tile loads (`vload8` over contiguous D), now
-   that the LDS-side P·V is fixed.
-3. A **redesign** for the structural ceiling (cross-q reuse / split-K), if the
-   target is >>16 GF/s — incremental ranks won't get there.
-4. Decode wants its own path eventually (S_q=1 is launch/barrier-floor bound).
+1. **Per-phase profiling** to confirm the post-session-2 dominant phase (likely
+   barriers + QK horizontal reduction).
+2. **Barrier reduction** (software-pipelined K/V load / double-buffer) — needs
+   an LDS budget that BR=32 doesn't leave; may trade BR down.
+3. A **dedicated decode kernel** (true GEMV-style, lane=key split-K) — the BR=8
+   reuse still wastes lanes at S_q=1; decode is memory-bound at ~4.3 GB/s
+   (≈7% of the 60 GB/s roofline), so there's headroom.
+4. Vectorized global K/V tile loads (`vload8` over contiguous D).
 
 ## Reproduce
 ```bash
