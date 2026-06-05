@@ -178,7 +178,8 @@ __kernel void flash_attention_fp32(
 #define FA_BR_H 8
 #endif
 #define FA_BC_H (FA_D / 4)                  // 32 for D=128
-#define FA_ROWSTEP (FA_D / FA_BC_H)         // 4: i1 = i0 + FA_ROWSTEP
+#define FA_ROWSTEP (FA_D / FA_BC_H)         // 4: rows handled by a lane are i0 + s*ROWSTEP
+#define FA_NSPL (FA_BR_H * FA_BC_H / FA_D)  // S elements per lane (2 for BR=8, 4 for BR=16)
 
 __kernel void flash_attention_fp16(
     __global const half *Q, __global const half *K, __global const half *V,
@@ -259,28 +260,28 @@ __kernel void flash_attention_fp16(
     {
       const int c = t % FA_BC_H;
       const int i0 = t / FA_BC_H;
-      const int i1 = i0 + FA_ROWSTEP;
-      __local const half* krow = K_local + c * FA_D;
-      __local const half* q0 = Q_local + i0 * FA_D;
-      __local const half* q1 = Q_local + i1 * FA_D;
-      float8 a0 = (float8)(0.0f);
-      float8 a1 = (float8)(0.0f);
-      for (int d8 = 0; d8 < FA_D / 8; ++d8) {
-        float8 kf = convert_float8(vload8(d8, krow));
-        a0 += convert_float8(vload8(d8, q0)) * kf;
-        a1 += convert_float8(vload8(d8, q1)) * kf;
-      }
-      float acc0 = a0.s0 + a0.s1 + a0.s2 + a0.s3 + a0.s4 + a0.s5 + a0.s6 + a0.s7;
-      float acc1 = a1.s0 + a1.s1 + a1.s2 + a1.s3 + a1.s4 + a1.s5 + a1.s6 + a1.s7;
       const int k_row = j_start + c;
-      const int qr0 = q_row_start + i0;
-      const int qr1 = q_row_start + i1;
-      const int qp0 = S_kv - S_q + qr0;
-      const int qp1 = S_kv - S_q + qr1;
-      S_local[i0 * FA_BC_H + c] =
-          (qr0 >= S_q || k_row >= S_kv || (causal_mask && k_row > qp0)) ? -INFINITY : acc0 * scale;
-      S_local[i1 * FA_BC_H + c] =
-          (qr1 >= S_q || k_row >= S_kv || (causal_mask && k_row > qp1)) ? -INFINITY : acc1 * scale;
+      __local const half* krow = K_local + c * FA_D;
+      float8 acc[FA_NSPL];
+      #pragma unroll
+      for (int s = 0; s < FA_NSPL; ++s) acc[s] = (float8)(0.0f);
+      for (int d8 = 0; d8 < FA_D / 8; ++d8) {
+        float8 kf = convert_float8(vload8(d8, krow));   // shared K row across rows
+        #pragma unroll
+        for (int s = 0; s < FA_NSPL; ++s) {
+          acc[s] += convert_float8(vload8(d8, Q_local + (i0 + s * FA_ROWSTEP) * FA_D)) * kf;
+        }
+      }
+      #pragma unroll
+      for (int s = 0; s < FA_NSPL; ++s) {
+        const int i = i0 + s * FA_ROWSTEP;
+        const int qr = q_row_start + i;
+        const int qp = S_kv - S_q + qr;
+        const float8 a = acc[s];
+        const float v = a.s0 + a.s1 + a.s2 + a.s3 + a.s4 + a.s5 + a.s6 + a.s7;
+        S_local[i * FA_BC_H + c] =
+            (qr >= S_q || k_row >= S_kv || (causal_mask && k_row > qp)) ? -INFINITY : v * scale;
+      }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 

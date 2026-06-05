@@ -33,7 +33,7 @@ class OpenCLFlashAttention2Op final : public aops::FlashAttention2Op {
 
   // Tile sizes — must match the kernel macros.
   static constexpr int kBr = 4;       // fp32 reference: q-rows per workgroup
-  static constexpr int kBrFp16 = 8;   // fp16 cross-q-reuse kernel: q-rows per wg (FA_BR_H)
+  static constexpr int kBrFp16 = 16;   // fp16 cross-q-reuse kernel: q-rows per wg (FA_BR_H)
 };
 
 class OpenCLFlashAttention2OpFactory : public TypedOpFactory<OpTypes::kFlashAttention2, aops::FlashAttention2OpOptions> {
