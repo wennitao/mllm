@@ -20,9 +20,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <numeric>
+#include <string>
 #include <vector>
 
 #include <CL/cl.h>
@@ -38,11 +40,17 @@
 using mllm::Context;
 using mllm::DeviceTypes;
 using mllm::kCPU;
+using mllm::kFloat16;
 using mllm::kFloat32;
 using mllm::kOpenCL;
 using mllm::Tensor;
 
 namespace {
+
+// Selected via the FA_DTYPE env var ("fp16" or "fp32", default fp32). The op
+// (OpenCLFlashAttention2Op) dispatches to flash_attention_fp16 vs _fp32 by the
+// input tensor dtype, so we only have to feed the right dtype here.
+bool g_use_fp16 = false;
 
 struct Shape {
   int B;
@@ -81,7 +89,7 @@ double gflops_causal(const Shape& sh, double ms) {
 // Real FA1 re-reads K/V per Q-block, so the kernel's effective bandwidth is
 // higher than this -- this number lets you compare against device peak BW.
 double gbps_optimal(const Shape& sh, double ms) {
-  const double bytes_per_elem = 4.0;  // fp32
+  const double bytes_per_elem = g_use_fp16 ? 2.0 : 4.0;
   const double bh = static_cast<double>(sh.B) * sh.H * sh.D;
   const double bytes = bytes_per_elem * (2.0 * bh * sh.S_q + 2.0 * bh * sh.S_kv);
   return (bytes / (ms * 1e-3)) / 1e9;
@@ -105,12 +113,13 @@ void print_device_limits(mllm::opencl::OpenCLRuntime* rt) {
 void print_kernel_local_mem(mllm::opencl::OpenCLRuntime* rt, int D, int kBr) {
   // Build the same kernel the op will JIT, so we can ask the driver how much
   // __local memory it actually allocates per work-group for this (D, Br).
+  const char* kname = g_use_fp16 ? "flash_attention_fp16" : "flash_attention_fp32";
   std::set<std::string> opts;
   opts.insert(std::string("-DFA_D=") + std::to_string(D));
   opts.insert(std::string("-DFA_BR=") + std::to_string(kBr));
-  auto kw = rt->buildKernel("flash_attention", "flash_attention_fp32", opts);
+  auto kw = rt->buildKernel("flash_attention", kname, opts);
   if (!kw) {
-    std::printf("[kernel] buildKernel failed for D=%d Br=%d\n", D, kBr);
+    std::printf("[kernel] buildKernel failed for %s D=%d Br=%d\n", kname, D, kBr);
     return;
   }
   const auto& devs = rt->getDevices();
@@ -119,7 +128,7 @@ void print_kernel_local_mem(mllm::opencl::OpenCLRuntime* rt, int D, int kBr) {
   kw->get().getWorkGroupInfo(devs.front(), CL_KERNEL_LOCAL_MEM_SIZE, &klocal);
   size_t kwgs = 0;
   kw->get().getWorkGroupInfo(devs.front(), CL_KERNEL_WORK_GROUP_SIZE, &kwgs);
-  std::printf("[kernel] flash_attention_fp32 D=%d Br=%d  local_mem=%llu B  max_wg_size=%zu\n", D, kBr,
+  std::printf("[kernel] %s D=%d Br=%d  local_mem=%llu B  max_wg_size=%zu\n", kname, D, kBr,
               static_cast<unsigned long long>(klocal), kwgs);
 }
 
@@ -127,9 +136,17 @@ void bench_one(const Shape& sh, int warmup, int iters) {
   // BHSD layout, matches what OpenCLFlashAttention2Op::forward expects.
   // Build on CPU so Tensor::random (which goes through CPU FillOp) works,
   // then ship to the device.
-  Tensor Q = Tensor::random({sh.B, sh.H, sh.S_q, sh.D}, -1.f, 1.f, kFloat32, kCPU).to(kOpenCL);
-  Tensor K = Tensor::random({sh.B, sh.H, sh.S_kv, sh.D}, -1.f, 1.f, kFloat32, kCPU).to(kOpenCL);
-  Tensor V = Tensor::random({sh.B, sh.H, sh.S_kv, sh.D}, -1.f, 1.f, kFloat32, kCPU).to(kOpenCL);
+  // Build random fp32 on CPU (Tensor::random uses the CPU FillOp), optionally
+  // cast to fp16 on CPU (OpenCL has no cast op, only device transfer), then
+  // ship to the device.
+  auto mk = [&](int s) {
+    Tensor t = Tensor::random({sh.B, sh.H, s, sh.D}, -1.f, 1.f, kFloat32, kCPU);
+    if (g_use_fp16) t = t.to(kFloat16);
+    return t.to(kOpenCL);
+  };
+  Tensor Q = mk(sh.S_q);
+  Tensor K = mk(sh.S_kv);
+  Tensor V = mk(sh.S_kv);
 
   mllm::aops::FlashAttention2OpOptions opts{};
   opts.B = sh.B;
@@ -168,6 +185,54 @@ void bench_one(const Shape& sh, int warmup, int iters) {
               gflops_causal(sh, st.min_ms), gbps_optimal(sh, st.min_ms));
 }
 
+// Run the op once on identical inputs in both fp32 and fp16 and report the
+// difference, so we know the fp16 kernel produces sane numbers (its commit
+// history flagged correctness issues) — not just how fast it is.
+void validate_fp16_vs_fp32(const Shape& sh) {
+  Tensor Q = Tensor::random({sh.B, sh.H, sh.S_q, sh.D}, -1.f, 1.f, kFloat32, kCPU);
+  Tensor K = Tensor::random({sh.B, sh.H, sh.S_kv, sh.D}, -1.f, 1.f, kFloat32, kCPU);
+  Tensor V = Tensor::random({sh.B, sh.H, sh.S_kv, sh.D}, -1.f, 1.f, kFloat32, kCPU);
+
+  auto run = [&](const Tensor& q, const Tensor& k, const Tensor& v) -> Tensor {
+    mllm::aops::FlashAttention2OpOptions opts{};
+    opts.B = sh.B;
+    opts.q_head = sh.H;
+    opts.kv_head = sh.H;
+    opts.D = sh.D;
+    opts.causal_mask = true;
+    mllm::opencl::OpenCLFlashAttention2Op op(opts);
+    std::vector<Tensor> in{q, k, v};
+    std::vector<Tensor> out;
+    op.reshape(in, out);
+    op.setup(in, out);
+    op.forward(in, out);
+    auto rt = std::static_pointer_cast<mllm::opencl::OpenCLBackend>(Context::instance().getBackend(kOpenCL))->runtime();
+    rt->commandQueue().finish();
+    return out[0];
+  };
+
+  Tensor o32 = run(Q.to(kOpenCL), K.to(kOpenCL), V.to(kOpenCL)).to(kCPU);
+  Tensor o16 = run(Q.to(kFloat16).to(kOpenCL), K.to(kFloat16).to(kOpenCL), V.to(kFloat16).to(kOpenCL)).to(kCPU).to(kFloat32);
+
+  const float* a = o32.ptr<float>();
+  const float* b = o16.ptr<float>();
+  const size_t n = static_cast<size_t>(sh.B) * sh.H * sh.S_q * sh.D;
+  double max_abs = 0.0, max_rel = 0.0, sum_abs = 0.0;
+  int bad = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (std::isnan(b[i]) || std::isinf(b[i])) {
+      ++bad;
+      continue;
+    }
+    const double d = std::fabs(static_cast<double>(a[i]) - static_cast<double>(b[i]));
+    max_abs = std::max(max_abs, d);
+    max_rel = std::max(max_rel, d / (std::fabs(static_cast<double>(a[i])) + 1e-6));
+    sum_abs += d;
+  }
+  std::printf("[validate]  S_q=%5d S_kv=%5d  max_abs=%.3e  max_rel=%.3e  mean_abs=%.3e  nan/inf=%d/%zu\n",
+              sh.S_q, sh.S_kv, max_abs, max_rel, sum_abs / (n ? n : 1), bad, n);
+}
+
 // Pre-announce a shape before any kernel runs, so if the Adreno watchdog
 // kills us mid-launch we know exactly which config did it.
 void announce(const Shape& sh) {
@@ -185,6 +250,11 @@ MLLM_MAIN({
 
   mllm::initOpenCLBackend();
 
+  // Dtype is chosen at runtime so one binary covers both kernels.
+  const char* dt = std::getenv("FA_DTYPE");
+  g_use_fp16 = (dt != nullptr && std::string(dt) == "fp16");
+  std::printf("[dtype] %s  (set FA_DTYPE=fp16 or fp32)\n", g_use_fp16 ? "fp16" : "fp32");
+
   // Qwen3 default dims. Override if you want a different model's shape -- the
   // sweep itself only varies S_q/S_kv, which is what we care about for the
   // prefill-vs-decode regime question.
@@ -199,6 +269,16 @@ MLLM_MAIN({
   print_device_limits(runtime.get());
   print_kernel_local_mem(runtime.get(), kD, kBr);
   std::printf("\n");
+
+  // When benchmarking fp16, first confirm the kernel is numerically sane
+  // (compare against the fp32 kernel on identical inputs).
+  if (g_use_fp16) {
+    std::printf("[correctness] fp16 kernel vs fp32 kernel (same inputs)\n");
+    validate_fp16_vs_fp32({kB, kH, 64, 64, kD, "val"});
+    validate_fp16_vs_fp32({kB, kH, 256, 256, kD, "val"});
+    validate_fp16_vs_fp32({kB, kH, 1, 512, kD, "val"});
+    std::printf("\n");
+  }
 
   std::printf("\n[mode=prefill]  S_q = S_kv = N\n");
   {

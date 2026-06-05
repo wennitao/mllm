@@ -1,0 +1,19 @@
+[device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=1024
+[kernel] flash_attention_fp16 D=128 Br=4  local_mem=18720 B  max_wg_size=1024
+note: GB/s here is computed with 2 bytes/elem (fp16), so it is half the fp32
+      file's GB/s for the SAME wall time -- not a regression. Latency/GF-s are
+      the apples-to-apples columns. See README_fp16.md.
+note: S=4096 omitted from prefill -- single FA kernel launch at that shape
+      trips the Adreno GPU watchdog (TDR) at ~13 s and the OS SIGKILLs the
+      process. Same as fp32.
+
+prefill     B=1 H=16 D=128  S_q=    2 S_kv=    2  min=   0.196 ms  med=   0.222 ms  mean=   0.243 ms      0.1 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q=    4 S_kv=    4  min=   0.215 ms  med=   0.278 ms  mean=   0.338 ms      0.4 GF/s     0.3 GB/s
+prefill     B=1 H=16 D=128  S_q=    8 S_kv=    8  min=   0.317 ms  med=   0.417 ms  mean=   0.460 ms      0.9 GF/s     0.4 GB/s
+prefill     B=1 H=16 D=128  S_q=   16 S_kv=   16  min=   0.456 ms  med=   0.527 ms  mean=   0.582 ms      2.4 GF/s     0.6 GB/s
+prefill     B=1 H=16 D=128  S_q=   32 S_kv=   32  min=   1.010 ms  med=   1.039 ms  mean=   1.076 ms      4.3 GF/s     0.5 GB/s
+prefill     B=1 H=16 D=128  S_q=   64 S_kv=   64  min=   3.278 ms  med=   3.344 ms  mean=   3.362 ms      5.2 GF/s     0.3 GB/s
+prefill     B=1 H=16 D=128  S_q=  128 S_kv=  128  min=  12.225 ms  med=  12.330 ms  mean=  12.415 ms      5.5 GF/s     0.2 GB/s
+prefill     B=1 H=16 D=128  S_q=  256 S_kv=  256  min=  48.030 ms  med=  48.255 ms  mean=  48.194 ms      5.6 GF/s     0.1 GB/s
+prefill     B=1 H=16 D=128  S_q= 1024 S_kv= 1024  min= 764.855 ms  med= 765.318 ms  mean= 765.244 ms      5.6 GF/s     0.0 GB/s
+prefill     B=1 H=16 D=128  S_q= 2048 S_kv= 2048  min=3119.410 ms  med=3126.542 ms  mean=3125.652 ms      5.5 GF/s     0.0 GB/s

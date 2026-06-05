@@ -1,0 +1,17 @@
+[device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=1024
+[kernel] flash_attention_fp16 D=128 Br=4  local_mem=18720 B  max_wg_size=1024
+note: GB/s here is computed with 2 bytes/elem (fp16), so it is half the fp32
+      file's GB/s for the SAME wall time -- not a regression. See README_fp16.md.
+
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    2  min=   0.181 ms  med=   0.296 ms  mean=   0.293 ms      0.1 GF/s     0.1 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    4  min=   0.252 ms  med=   0.290 ms  mean=   0.300 ms      0.1 GF/s     0.2 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    8  min=   0.267 ms  med=   0.298 ms  mean=   0.329 ms      0.1 GF/s     0.3 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   16  min=   0.242 ms  med=   0.292 ms  mean=   0.320 ms      0.3 GF/s     0.6 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   32  min=   0.339 ms  med=   0.362 ms  mean=   0.373 ms      0.4 GF/s     0.8 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   64  min=   0.466 ms  med=   0.518 ms  mean=   0.542 ms      0.6 GF/s     1.1 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  128  min=   0.735 ms  med=   0.786 ms  mean=   0.816 ms      0.7 GF/s     1.4 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  256  min=   1.287 ms  med=   1.352 ms  mean=   1.384 ms      0.8 GF/s     1.6 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  512  min=   2.396 ms  med=   2.445 ms  mean=   2.518 ms      0.9 GF/s     1.8 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 1024  min=   4.690 ms  med=   4.818 ms  mean=   4.853 ms      0.9 GF/s     1.8 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 2048  min=   9.197 ms  med=   9.349 ms  mean=   9.359 ms      0.9 GF/s     1.8 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 4096  min=  18.257 ms  med=  18.442 ms  mean=  18.485 ms      0.9 GF/s     1.8 GB/s

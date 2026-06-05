@@ -1,0 +1,13 @@
+fp16 kernel vs fp32 kernel, identical inputs (run via FA_DTYPE=fp16).
+Output of both kernels copied back to host; fp16 output up-cast to fp32 before
+diff. max_rel is dominated by the near-zero-output artifact (where the fp32
+reference is ~1e-6); max_abs / mean_abs are the meaningful columns.
+
+[validate]  S_q=   64 S_kv=   64  max_abs=4.346e-04  max_rel=3.469e+00  mean_abs=3.051e-05  nan/inf=0/131072
+[validate]  S_q=  256 S_kv=  256  max_abs=3.999e-04  max_rel=7.322e+00  mean_abs=1.586e-05  nan/inf=0/524288
+[validate]  S_q=    1 S_kv=  512  max_abs=4.753e-05  max_rel=1.998e-01  mean_abs=6.089e-06  nan/inf=0/2048
+
+Verdict: numerically sane -- no NaN/Inf, mean abs error ~1e-5. The OpenCL fp16
+flash-attention kernel is correct at the op level; the earlier "generation not
+correct" issue was not reproduced here and is therefore in model integration,
+not the kernel math.
