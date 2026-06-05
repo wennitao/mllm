@@ -288,15 +288,15 @@ __kernel void flash_attention_fp16(
       float l_tilde = 0.0f;
       for (int c = 0; c < FA_BC_H; ++c) {
         const float s = S_local[i * FA_BC_H + c];
-        const float p = (s == -INFINITY) ? 0.0f : exp(s - m_tilde);
+        const float p = (s == -INFINITY) ? 0.0f : native_exp(s - m_tilde);
         P_local[i * FA_BC_H + c] = p;
         l_tilde += p;
       }
       const float m_old = m_il[i];
       const float l_old = l_il[i];
       const float m_new = fmax(m_old, m_tilde);
-      const float a = (m_old == -INFINITY) ? 0.0f : exp(m_old - m_new);
-      const float bb = (m_tilde == -INFINITY) ? 0.0f : exp(m_tilde - m_new);
+      const float a = (m_old == -INFINITY) ? 0.0f : native_exp(m_old - m_new);
+      const float bb = (m_tilde == -INFINITY) ? 0.0f : native_exp(m_tilde - m_new);
       const float l_new = a * l_old + bb * l_tilde;
       sh_a[i] = a;
       sh_bb[i] = bb;
