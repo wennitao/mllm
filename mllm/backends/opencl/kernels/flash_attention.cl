@@ -284,20 +284,27 @@ __kernel void flash_attention_fp16(
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Online softmax — hoisted: one producer lane per valid Q row.
+    // Online softmax — hoisted: one producer lane per valid Q row. Vectorized
+    // max / exp / sum over c (native_exp on float8). Masked entries are -INF;
+    // select() forces their prob to 0 (don't trust native_exp(-INF)).
     if (t < nrows) {
       const int i = t;
-      float m_tilde = -INFINITY;
-      for (int c = 0; c < FA_BC_H; ++c) {
-        m_tilde = fmax(m_tilde, S_local[i * FA_BC_H + c]);
+      __local float* prow = S_local + i * FA_BC_H;  // aliased: scores in, probs out
+      float8 m8 = (float8)(-INFINITY);
+      for (int c8 = 0; c8 < FA_BC_H / 8; ++c8) m8 = fmax(m8, vload8(c8, prow));
+      float4 m4 = fmax(m8.lo, m8.hi);
+      float2 m2 = fmax(m4.lo, m4.hi);
+      float m_tilde = fmax(m2.s0, m2.s1);
+      float8 l8 = (float8)(0.0f);
+      for (int c8 = 0; c8 < FA_BC_H / 8; ++c8) {
+        const float8 s8 = vload8(c8, prow);
+        const float8 p8 = select(native_exp(s8 - m_tilde), (float8)(0.0f), isinf(s8));
+        vstore8(p8, c8, prow);
+        l8 += p8;
       }
-      float l_tilde = 0.0f;
-      for (int c = 0; c < FA_BC_H; ++c) {
-        const float s = S_local[i * FA_BC_H + c];
-        const float p = (s == -INFINITY) ? 0.0f : native_exp(s - m_tilde);
-        S_local[i * FA_BC_H + c] = p;  // alias: overwrite score with prob (max already taken)
-        l_tilde += p;
-      }
+      float4 l4 = l8.lo + l8.hi;
+      float2 l2 = l4.lo + l4.hi;
+      float l_tilde = l2.s0 + l2.s1;
       const float m_old = m_il[i];
       const float l_old = l_il[i];
       const float m_new = fmax(m_old, m_tilde);
