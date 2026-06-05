@@ -281,6 +281,10 @@ MLLM_MAIN({
     // exercise the partial-block paths.
     validate_fp16_vs_fp32({kB, kH, 130, 130, kD, "val"});
     validate_fp16_vs_fp32({kB, kH, 100, 250, kD, "val"});
+    // Small S_q (< kSmallSqThreshold) exercises the small-tile decode kernel's
+    // prefill path (and its partial-block handling).
+    validate_fp16_vs_fp32({kB, kH, 20, 20, kD, "val"});
+    validate_fp16_vs_fp32({kB, kH, 7, 40, kD, "val"});
     std::printf("\n");
   }
 
