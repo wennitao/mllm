@@ -154,14 +154,20 @@ remaining levers do need real work (barrier reduction via K/V double-buffering �
 blocked by the 32 KB LDS budget at BR=32; or an HMX/dot path absent in OpenCL).
 
 ## Next steps (evidence-ranked)
-1. **Per-phase profiling** to confirm the post-session-2 dominant phase (likely
-   barriers + QK horizontal reduction).
-2. **Barrier reduction** (software-pipelined K/V load / double-buffer) — needs
-   an LDS budget that BR=32 doesn't leave; may trade BR down.
-3. A **dedicated decode kernel** (true GEMV-style, lane=key split-K) — the BR=8
-   reuse still wastes lanes at S_q=1; decode is memory-bound at ~4.3 GB/s
-   (≈7% of the 60 GB/s roofline), so there's headroom.
-4. Vectorized global K/V tile loads (`vload8` over contiguous D).
+1. **Dedicated decode kernel — the biggest remaining opportunity.** Decode sits
+   at ~5.5 GB/s, only ~9% of the 60 GB/s roofline (~10× headroom). The key
+   insight: at S_q=1 each K and V element is used **exactly once**, so there is
+   **no reuse** — the current kernel's global→LDS K/V tiling is pure overhead.
+   A proper decode kernel should **stream K/V straight from global** with
+   coalesced access (the same problem the LPBQ decode GEMV v6 solved via a
+   transposed `[K/4,N/4,4]` layout), all 128 lanes busy, online softmax. This is
+   a from-scratch GEMV-style kernel, not an incremental tweak.
+2. **Prefill is at its ceiling** for this design (~116 GF/s). Going further needs
+   either barrier elimination (blocked: wave<128 so no subgroup barriers;
+   double-buffer K/V overflows the 32 KB LDS at BR=32) or an HMX/dot-product path
+   that OpenCL on Adreno doesn't expose. Both are large, uncertain efforts.
+3. Per-phase profiling (QK^T vs P·V vs softmax vs barriers) to confirm where the
+   residual prefill time goes before any further prefill attempt.
 
 ## Reproduce
 ```bash
