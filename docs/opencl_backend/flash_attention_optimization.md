@@ -11,12 +11,16 @@ Bench + raw numbers: [examples/fa_opencl_bench/](../../examples/fa_opencl_bench/
 (`FA_DTYPE=fp16|fp32`). Device roofline reference for the matmul side:
 the OpenCL LPBQ work (separate branch).
 
-> **Status (current):** prefill **~102–106 GF/s** @ S≥1024 (≈3.5% of the 3 TF
-> peak), decode neutral. That is **~19× over the fp16 v1 baseline** and ~7× over
-> the session-1 result below. Session 1 (ranks 1–5) reached ~16 GF/s and
-> concluded the rest needed a redesign; **session 2 disproved that** — two
-> structural-but-incremental changes (causal block-skip + cross-q reuse) got to
-> ~100 GF/s with no algorithm change. See "Session 2" below.
+> **Status (current):** prefill **~111–116 GF/s** @ S≥1024 (≈3.7–3.9% of the 3 TF
+> peak; S=2048 = 148 ms), decode **~5.5 GB/s** (S_kv=4096 6.15 ms). That is
+> **~20× over the fp16 v1 baseline** and ~7× over the session-1 result. Session 1
+> (ranks 1–5) reached ~16 GF/s and concluded the rest needed a redesign;
+> **session 2 disproved that** — causal block-skip + cross-q reuse + a vectorized
+> softmax got there with no algorithm change. The prefill ceiling is now genuine:
+> bank-conflict padding, manual V-register hoisting, and subgroup barriers were
+> all tried and gave nothing (the Adreno wave is <128 lanes, so the 128-lane
+> workgroup barriers are irreducible; double-buffering K/V to cut them overflows
+> the 32 KB LDS at BR=32). See "Session 2" below.
 
 ## The key reframe: FA is not slow for the reason GEMM was
 
@@ -120,16 +124,25 @@ S_q=130 / 100×250; no NaN).
 | 5 | **BR=32 + S/P LDS alias** (alias the prob buffer into S_local; frees 4 KB → BR=32 fits the 32 KB ceiling, FA_NSPL=8) | 80 → 102 GF/s (1.28×) | `bb48e9f5` |
 | 6 | **Dual-kernel** — same source compiled BR=32 (prefill) and BR=8 (decode/tiny S_q); op picks by S_q | decode back to baseline (BR=32 alone was −40% at S_q=1) | `0d9fd6d4` |
 
+| 7 | **Vectorized softmax** (`native_exp` on float8 + `select` for the -inf guard) | 102 → 111 GF/s (1.09×) | `9c6a8a06` |
+| 8 | **Decode kernel BR=4** (FA_NSPL=1, less wasted-row work at S_q=1) | decode ~9% | `d05d08a4` |
+
 **Final (min latency):**
 
 | S | rank-5 (start) | session-2 | speedup | GF/s |
 |---:|---:|---:|---:|---:|
-| prefill 128 | 6.11 ms | **1.46 ms** | 4.2× | — |
-| prefill 256 | 16.7 ms | **3.55 ms** | 4.7× | 83 |
-| prefill 1024 | 266 ms | **42.6 ms** | 6.2× | 102 |
-| prefill 2048 | 1136 ms | **162 ms** | 7.0× | ~106 |
-| decode 2048 | 3.98 ms | **3.92 ms** | neutral | — |
-| decode 4096 | 7.87 ms | **7.60 ms** | neutral | — |
+| prefill 128 | 6.11 ms | **1.06 ms** | 5.8× | 64 |
+| prefill 256 | 16.7 ms | **3.04 ms** | 5.5× | 89 |
+| prefill 1024 | 266 ms | **38.7 ms** | 6.9× | 111 |
+| prefill 2048 | 1136 ms | **148 ms** | 7.7× | 116 |
+| decode 2048 | 3.98 ms | **3.21 ms** | 1.24× | — |
+| decode 4096 | 7.87 ms | **6.15 ms** | 1.28× | 5.5 GB/s |
+
+**Explored, no gain (confirms the ceiling):** LDS bank-conflict padding of the
+transposed-V tile (neutral — conflicts aren't the limiter); manual V-register
+hoisting in P·V (neutral — the compiler already hoists loop-invariant loads);
+`sub_group_barrier` instead of workgroup `barrier` (broke correctness → the
+Adreno wave is <128 lanes, so the 128-lane barriers can't be downgraded).
 
 **Corrected ceiling read:** session 1 called ~16 GF/s a near-plateau needing a
 redesign — wrong. The dominant cost was *wasted work* (causal upper-triangle
