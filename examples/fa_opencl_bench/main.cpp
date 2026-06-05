@@ -280,15 +280,23 @@ MLLM_MAIN({
     std::printf("\n");
   }
 
+  // FA_QUICK=1 runs a reduced sweep (S=256,1024 prefill; S_kv=1024,2048 decode)
+  // for fast optimization iteration; default runs the full sweep.
+  const char* quick = std::getenv("FA_QUICK");
+  const bool is_quick = (quick != nullptr && quick[0] == '1');
+
   std::printf("\n[mode=prefill]  S_q = S_kv = N\n");
   {
     // Skip N=4096 here: a single FA kernel launch at that shape runs for
     // ~13 s on Adreno 830, which trips the GPU watchdog (TDR) and the OS
     // SIGKILLs the process. NPU and CPU benches include 4096; OpenCL
     // cannot without splitting the kernel launch.
-    const int n_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 1024, 2048};
-    for (int n : n_sizes) {
-      Shape sh{kB, kH, n, n, kD, "prefill"};
+    const int full[] = {2, 4, 8, 16, 32, 64, 128, 256, 1024, 2048};
+    const int quick_sizes[] = {256, 1024};
+    const int* n_sizes = is_quick ? quick_sizes : full;
+    const int n_count = is_quick ? 2 : 10;
+    for (int idx = 0; idx < n_count; ++idx) {
+      Shape sh{kB, kH, n_sizes[idx], n_sizes[idx], kD, "prefill"};
       announce(sh);
       bench_one(sh, kWarmup, kIters);
     }
@@ -297,9 +305,12 @@ MLLM_MAIN({
   std::printf("\n[mode=decode]   S_q fixed = 1, S_kv varies\n");
   {
     constexpr int kS_q = 1;
-    const int s_kv_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
-    for (int s_kv : s_kv_sizes) {
-      Shape sh{kB, kH, kS_q, s_kv, kD, "decode"};
+    const int full[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
+    const int quick_sizes[] = {1024, 2048};
+    const int* s_kv_sizes = is_quick ? quick_sizes : full;
+    const int s_count = is_quick ? 2 : 12;
+    for (int idx = 0; idx < s_count; ++idx) {
+      Shape sh{kB, kH, kS_q, s_kv_sizes[idx], kD, "decode"};
       announce(sh);
       bench_one(sh, kWarmup, kIters);
     }

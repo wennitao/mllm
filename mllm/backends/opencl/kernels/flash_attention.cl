@@ -228,7 +228,15 @@ __kernel void flash_attention_fp16(
 
   barrier(CLK_LOCAL_MEM_FENCE);
 
-  for (int j_start = 0; j_start < S_kv; j_start += FA_BC_H) {
+  // Causal block-skip: a q_block's last row attends to keys up to q_pos; any K/V
+  // block starting beyond that is fully masked, so cap the loop instead of
+  // looping all of S_kv and masking. ~2x fewer j-iters on avg for causal prefill.
+  int j_max = S_kv;
+  if (causal_mask) {
+    const int last_q_pos = S_kv - S_q + (q_row_start + FA_BR - 1);
+    j_max = min(S_kv, last_q_pos + 1);
+  }
+  for (int j_start = 0; j_start < j_max; j_start += FA_BC_H) {
     // Load K_j, V_j tiles (BC_H rows) — each lane loads BC_H elements.
     for (int c = 0; c < FA_BC_H; ++c) {
       const int k_row = j_start + c;
