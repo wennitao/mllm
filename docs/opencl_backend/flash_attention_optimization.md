@@ -48,7 +48,7 @@ store in half" rule.
 | 2 | **Native-`half` LDS** for Q/K/V/P (was widened to `float`) — halves LDS traffic, lets `FA_BC=32` fit 32 KB, enables `half8` loads | GEMM fp16 storage | **DONE** | makes fp16 finally beat fp32 |
 | 3 | **Hoisted softmax**: one producer lane/row computes `m`,`exp`,`l` once → LDS broadcast (was recomputed ×128) | GEMV subgroup-reduce | **DONE** | |
 | 4 | **`half8`-vectorized QK^T dot**, `float8` accumulate, horizontal sum | fp16 GEMM `vload16`→FMA | **DONE** | |
-| 5 | **Vectorize P·V**: 8-d/lane re-tile + transposed-V LDS tile (`V_localT[d*BC+c]`) for contiguous `vload8`, free `vstore8` O | GEMM register-tile + coalesced store | **TODO** | now the dominant phase |
+| 5 | **Vectorize P·V**: transposed-V LDS tile (`V_localT[d*BC+c]`) so the P·V read is contiguous in `c` → `half8`/`float8` `vload8` + fp32 accumulate (kept the 1-d/lane mapping; no 8-d re-tile) | GEMM register-tile + contiguous reads | **DONE** | the dominant phase post-1-4; +1.4× |
 | 6 | Vectorize global K/V tile loads (`vload8` over contiguous D) | GEMM wide loads | TODO (minor) | guard pointer alignment |
 | 7 | `image1d_buffer` texture for re-read K/V | GEMM image acts | **deferred** | weak transfer: K/V dynamic, cross-WG reuse scheduling-dependent, FA not BW-bound |
 | 8 | Coalesced vector O store | GEMM `vstore4` | **dropped** | FA's O store is already coalesced |
@@ -57,52 +57,56 @@ The fp32 kernel is left **untouched** as the numeric reference (`FA_DTYPE=fp32`)
 Optimizations apply only to `flash_attention_fp16` (the half-storage path is what
 lets `FA_BC=32` fit; fp32 float-LDS at BC=32 would overflow the 32 KB budget).
 
-## Measured result — ranks 1-4 (on-device, Adreno 830)
+## Measured result — ranks 1-5 (on-device, Adreno 830)
 
-Correctness preserved: fp16 vs fp32 kernel max_abs ~4e-4, mean_abs ~1.5e-5, no
-NaN/Inf (unchanged from the v1 fp16 kernel; both float-accumulate).
+Correctness preserved at every step: fp16 vs fp32 kernel max_abs ~4e-4, mean_abs
+~1.5e-5, no NaN/Inf (unchanged from the v1 fp16 kernel; all float-accumulate).
+
+Cumulative: **~2.9× prefill (5.5 → ~16 GF/s @S=1024), ~2.3× decode**; fp16 now
+beats fp32 ~3× (it used to tie). The ranks-1-4 vs rank-5 columns below are a
+clean same-device A/B (the two physical SM8750 units measured within ~0.5%).
 
 **Prefill** (min latency, S_q=S_kv):
 
-| S | fp32 ref | fp16 v1 | **fp16 opt** | opt GF/s | opt vs v1 |
-|---:|---:|---:|---:|---:|---:|
-| 64   | 3.28 ms  | 3.28 ms  | **1.76 ms**  | 9.7  | 1.86× |
-| 128  | 12.22 ms | 12.23 ms | **6.11 ms**  | 11.1 | 2.00× |
-| 256  | 48.44 ms | 48.03 ms | **23.99 ms** | 11.2 | 2.00× |
-| 1024 | 791 ms   | 765 ms   | **378 ms**   | 11.4 | 2.02× |
-| 2048 | 3220 ms  | 3119 ms  | **1586 ms**  | 10.8 | 1.97× |
+| S | fp16 v1 | ranks 1-4 | **ranks 1-5** | 1-5 GF/s | r5 vs 1-4 | total vs v1 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 128  | 12.23 ms | 6.09 ms  | **4.31 ms**   | 15.7 | 1.41× | 2.84× |
+| 256  | 48.03 ms | 23.82 ms | **16.70 ms**  | 16.1 | 1.43× | 2.88× |
+| 1024 | 765 ms   | 378 ms   | **266 ms**    | 16.1 | 1.42× | 2.87× |
+| 2048 | 3119 ms  | 1587 ms  | **1136 ms**   | 15.1 | 1.40× | 2.75× |
 
 **Decode** (min latency, S_q=1):
 
-| S_kv | fp16 v1 | **fp16 opt** | opt vs v1 |
-|---:|---:|---:|---:|
-| 512  | 2.40 ms  | **1.44 ms**  | 1.67× |
-| 1024 | 4.69 ms  | **2.72 ms**  | 1.72× |
-| 2048 | 9.20 ms  | **5.28 ms**  | 1.74× |
-| 4096 | 18.26 ms | **10.43 ms** | 1.75× |
+| S_kv | fp16 v1 | ranks 1-4 | **ranks 1-5** | r5 vs 1-4 | total vs v1 |
+|---:|---:|---:|---:|---:|---:|
+| 512  | 2.40 ms  | 1.44 ms  | **1.12 ms**  | 1.29× | 2.14× |
+| 1024 | 4.69 ms  | 2.74 ms  | **2.07 ms**  | 1.32× | 2.27× |
+| 2048 | 9.20 ms  | 5.25 ms  | **3.93 ms**  | 1.34× | 2.34× |
+| 4096 | 18.26 ms | 10.36 ms | **7.87 ms**  | 1.32× | 2.32× |
 
-**~2× prefill, ~1.75× decode**, and fp16 now beats fp32 ~2× (it used to tie).
-5.5 → ~11.4 GF/s prefill.
+Per-step: **ranks 1-4 ≈ 2× (mostly the rank-1 lane recovery), rank 5 ≈ +1.4×**
+(P·V was the dominant phase after 1-4, exactly as predicted). Decode now sustains
+~4.3 GB/s (was ~1.8 effective).
 
-### Honest read of the gap to the projection
-The multi-agent analysis projected ~20-40× from ranks 1-5; ranks 1-4 delivered
-**~2×**. The measured 2× tracks the **lane-recovery from rank 1** almost exactly,
-which means ranks 3-4 added little *observable* throughput on top — because the
-now-dominant cost is the **still-scalar P·V phase** (rank 5, deferred): each lane
-does `FA_BR*FA_BC = 128` scalar FMAs reading `V_local[c*D+t]` at **stride-128 in
-LDS**. (Per-technique attribution was not isolated — ranks 1 and 2 are coupled,
-since BC=32 needs half storage to fit.) This is exactly why we measure: the
-biggest remaining lever is **rank 5**, and per-phase profiling (QK^T vs softmax
-vs P·V) should come before further work.
+### Honest read: still ~0.5% of peak
+At ~16 GF/s prefill we are ~3× up but still **~0.5% of the ~3 TF fp16 peak** and
+far from the ~150 GF/s aspiration. Ranks 1-5 fixed the *gross* waste (idle lanes,
+redundant exp, scalar/strided dots). The remaining gap is structural and harder:
+this kernel still has **one S-element-per-lane QK^T with a per-lane horizontal
+reduction, no cross-q data reuse, and 4 barriers per j-iter** — none of which the
+GEMM-style register-tiled reuse can be bolted onto without a different algorithm
+(split-K / two-pass, or an HMX dot path). So ~16 GF/s is a reasonable plateau for
+*this* design; the next big step is a redesign, not another incremental rank.
 
 ## Next steps (evidence-ranked)
-1. **Rank 5 — vectorize P·V** with a transposed-V LDS tile (the now-dominant
-   phase). Highest expected remaining lever.
-2. **Per-phase profiling** to confirm P·V dominance and quantify ranks 3/4 in
-   isolation (A/B the hoisted-softmax barrier and the half8 QK dot).
-3. Rank 6 (vectorized global K/V loads) once P·V is fixed.
-4. Decode needs its own attention path eventually (S_q=1 is launch/barrier-floor
-   bound, not compute-bound).
+1. **Per-phase profiling** (QK^T vs softmax vs P·V vs barriers) to find the new
+   dominant phase post-rank-5 and isolate ranks 3/4 (A/B the softmax barrier and
+   the half8 QK dot, which were masked by P·V before).
+2. Rank 6 — vectorized global K/V tile loads (`vload8` over contiguous D), now
+   that the LDS-side P·V is fixed.
+3. A **redesign** for the structural ceiling (cross-q reuse / split-K), if the
+   target is >>16 GF/s — incremental ranks won't get there.
+4. Decode wants its own path eventually (S_q=1 is launch/barrier-floor bound).
 
 ## Reproduce
 ```bash

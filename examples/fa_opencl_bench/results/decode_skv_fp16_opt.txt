@@ -1,17 +1,17 @@
-[device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=1024
-[kernel] flash_attention_fp16 D=128 Br=4  local_mem=18528 B  max_wg_size=1024
-OPTIMIZED fp16 kernel (ranks 1-4). ~1.75x over the v1 fp16 baseline
-(decode_skv_fp16.txt). See docs/opencl_backend/flash_attention_optimization.md.
+[device] QUALCOMM Adreno(TM) 830  local_mem=32768 B  global_mem=7578 MB  CUs=12  max_wg=768
+[kernel] flash_attention_fp16 D=128 Br=4  local_mem=18528 B  max_wg_size=768
+OPTIMIZED fp16 kernel (ranks 1-5). ~1.3x over ranks 1-4, ~2.3x over fp16 v1.
+See docs/opencl_backend/flash_attention_optimization.md.
 
-decode      B=1 H=16 D=128  S_q=    1 S_kv=    2  min=   0.248 ms  med=   0.281 ms  mean=   0.317 ms      0.0 GF/s     0.1 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=    4  min=   0.236 ms  med=   0.296 ms  mean=   0.298 ms      0.1 GF/s     0.2 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=    8  min=   0.250 ms  med=   0.320 ms  mean=   0.346 ms      0.1 GF/s     0.3 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=   16  min=   0.201 ms  med=   0.310 ms  mean=   0.321 ms      0.3 GF/s     0.7 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=   32  min=   0.274 ms  med=   0.302 ms  mean=   0.307 ms      0.5 GF/s     1.0 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=   64  min=   0.349 ms  med=   0.380 ms  mean=   0.387 ms      0.8 GF/s     1.5 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=  128  min=   0.492 ms  med=   0.516 ms  mean=   0.539 ms      1.1 GF/s     2.1 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=  256  min=   0.799 ms  med=   0.825 ms  mean=   0.850 ms      1.3 GF/s     2.6 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv=  512  min=   1.437 ms  med=   1.494 ms  mean=   1.513 ms      1.5 GF/s     2.9 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv= 1024  min=   2.724 ms  med=   2.976 ms  mean=   2.957 ms      1.5 GF/s     3.1 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv= 2048  min=   5.277 ms  med=   5.410 ms  mean=   5.442 ms      1.6 GF/s     3.2 GB/s
-decode      B=1 H=16 D=128  S_q=    1 S_kv= 4096  min=  10.429 ms  med=  10.718 ms  mean=  10.675 ms      1.6 GF/s     3.2 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    2  min=   0.253 ms  med=   0.274 ms  mean=   0.297 ms      0.0 GF/s     0.1 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    4  min=   0.240 ms  med=   0.271 ms  mean=   0.288 ms      0.1 GF/s     0.2 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=    8  min=   0.257 ms  med=   0.285 ms  mean=   0.312 ms      0.1 GF/s     0.3 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   16  min=   0.229 ms  med=   0.278 ms  mean=   0.297 ms      0.3 GF/s     0.6 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   32  min=   0.248 ms  med=   0.270 ms  mean=   0.269 ms      0.5 GF/s     1.1 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=   64  min=   0.322 ms  med=   0.346 ms  mean=   0.369 ms      0.8 GF/s     1.7 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  128  min=   0.423 ms  med=   0.460 ms  mean=   0.473 ms      1.2 GF/s     2.5 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  256  min=   0.648 ms  med=   0.665 ms  mean=   0.679 ms      1.6 GF/s     3.2 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv=  512  min=   1.117 ms  med=   1.171 ms  mean=   1.190 ms      1.9 GF/s     3.8 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 1024  min=   2.072 ms  med=   2.147 ms  mean=   2.172 ms      2.0 GF/s     4.1 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 2048  min=   3.927 ms  med=   4.019 ms  mean=   4.084 ms      2.1 GF/s     4.3 GB/s
+decode      B=1 H=16 D=128  S_q=    1 S_kv= 4096  min=   7.871 ms  med=   7.976 ms  mean=   8.228 ms      2.1 GF/s     4.3 GB/s

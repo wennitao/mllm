@@ -201,8 +201,9 @@ __kernel void flash_attention_fp16(
   const int o_h_off = bh * S_q * D;
 
   __local half  Q_local[FA_BR * FA_D];
-  __local half  K_local[FA_BC_H * FA_D];
-  __local half  V_local[FA_BC_H * FA_D];
+  __local half  K_local[FA_BC_H * FA_D];     // c-major [c*D + d] for the QK^T dot
+  __local half  V_localT[FA_D * FA_BC_H];    // rank 5: TRANSPOSED [d*FA_BC_H + c]
+                                             // so P·V reads contiguous in c (vload8)
   __local float S_local[FA_BR * FA_BC_H];   // scores (fp32)
   __local float P_local[FA_BR * FA_BC_H];   // exp probs, staged for broadcast (fp32)
   __local float m_il[FA_BR];
@@ -233,10 +234,12 @@ __kernel void flash_attention_fp16(
       const int k_row = j_start + c;
       if (k_row < S_kv) {
         K_local[c * FA_D + t] = K[k_h_off + k_row * K_s_stride + t];
-        V_local[c * FA_D + t] = V[v_h_off + k_row * V_s_stride + t];
+        // Global read coalesced (adjacent lanes t → adjacent addr); LDS write is
+        // transposed (strided once) so the hot P·V read is contiguous in c.
+        V_localT[t * FA_BC_H + c] = V[v_h_off + k_row * V_s_stride + t];
       } else {
         K_local[c * FA_D + t] = (half)0;
-        V_local[c * FA_D + t] = (half)0;
+        V_localT[t * FA_BC_H + c] = (half)0;
       }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -296,16 +299,24 @@ __kernel void flash_attention_fp16(
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // P·V + O rescale — ALL lanes: lane t owns d=t. (PV scalar in c; rank 5.)
-    for (int i = 0; i < FA_BR; ++i) {
-      float pv = 0.0f;
-      for (int c = 0; c < FA_BC_H; ++c) {
-        pv += P_local[i * FA_BC_H + c] * (float)V_local[c * FA_D + t];
+    // P·V + O rescale — ALL lanes: lane t owns d=t. rank 5: vectorized over c.
+    // P_local[i] is contiguous in c; V_localT[t] (= row d=t) is contiguous in c
+    // after the transpose → both vload8; accumulate in fp32. (FA_BC_H % 8 == 0.)
+    {
+      __local const half* vrow = V_localT + t * FA_BC_H;
+      for (int i = 0; i < FA_BR; ++i) {
+        __local const float* prow = P_local + i * FA_BC_H;
+        float8 pv8 = (float8)(0.0f);
+        for (int c8 = 0; c8 < FA_BC_H / 8; ++c8) {
+          pv8 += vload8(c8, prow) * convert_float8(vload8(c8, vrow));
+        }
+        const float pv = pv8.s0 + pv8.s1 + pv8.s2 + pv8.s3 +
+                         pv8.s4 + pv8.s5 + pv8.s6 + pv8.s7;
+        const float a = sh_a[i], bb = sh_bb[i];
+        const float l_old = sh_lold[i], l_new = sh_lnew[i];
+        o_priv[i] =
+            (l_new > 0.0f) ? (l_old * a * o_priv[i] + bb * pv) / l_new : 0.0f;
       }
-      const float a = sh_a[i], bb = sh_bb[i];
-      const float l_old = sh_lold[i], l_new = sh_lnew[i];
-      o_priv[i] =
-          (l_new > 0.0f) ? (l_old * a * o_priv[i] + bb * pv) / l_new : 0.0f;
     }
     barrier(CLK_LOCAL_MEM_FENCE);
   }
