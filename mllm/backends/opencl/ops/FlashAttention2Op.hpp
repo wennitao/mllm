@@ -29,11 +29,14 @@ class OpenCLFlashAttention2Op final : public aops::FlashAttention2Op {
   // compile-time constant in the kernel (sizes __local arrays).
   int built_for_d_ = 0;
   std::shared_ptr<KernelWrap> kernel_fp32_ = nullptr;
-  std::shared_ptr<KernelWrap> kernel_fp16_ = nullptr;
+  std::shared_ptr<KernelWrap> kernel_fp16_ = nullptr;        // prefill (big tile)
+  std::shared_ptr<KernelWrap> kernel_fp16_small_ = nullptr;  // decode / tiny S_q
 
-  // Tile sizes — must match the kernel macros.
-  static constexpr int kBr = 4;       // fp32 reference: q-rows per workgroup
-  static constexpr int kBrFp16 = 32;   // fp16 cross-q-reuse kernel: q-rows per wg (FA_BR_H)
+  // Tile sizes — must match the kernel macros (FA_BR_H).
+  static constexpr int kBr = 4;             // fp32 reference: q-rows per workgroup
+  static constexpr int kBrFp16 = 32;        // fp16 prefill: q-rows per wg (max cross-q reuse)
+  static constexpr int kBrFp16Small = 8;    // fp16 decode/tiny S_q: q-rows per wg
+  static constexpr int kSmallSqThreshold = 32;  // S_q < this -> use the small-tile kernel
 };
 
 class OpenCLFlashAttention2OpFactory : public TypedOpFactory<OpTypes::kFlashAttention2, aops::FlashAttention2OpOptions> {

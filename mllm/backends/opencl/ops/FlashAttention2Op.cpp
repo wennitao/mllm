@@ -62,16 +62,24 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
   // Lazy build per head_dim — FA_D macro sizes __local arrays.
   if (built_for_d_ != D) {
     auto runtime = std::static_pointer_cast<OpenCLBackend>(mllm::Context::instance().getBackend(kOpenCL))->runtime();
-    // fp16 kernel processes kBrFp16 q-rows per workgroup (cross-q reuse); fp32
-    // reference uses kBr. The host dispatch below matches each kernel's row count.
-    std::set<std::string> opts;
-    opts.insert(std::string("-DFA_D=") + std::to_string(D));
-    opts.insert(std::string("-DFA_BR=") + std::to_string(kBr));
-    opts.insert(std::string("-DFA_BR_H=") + std::to_string(kBrFp16));
-    kernel_fp32_ = runtime->buildKernel("flash_attention", "flash_attention_fp32", opts);
+    // The fp16 kernel is compiled twice from the same parametric source: a
+    // big-tile prefill build (FA_BR_H=kBrFp16, max cross-q reuse) and a small
+    // build (FA_BR_H=kBrFp16Small) for decode / tiny S_q, where the big tile
+    // would waste FA_NSPL QK dots per lane on out-of-range rows. The host picks
+    // by S_q. fp32 reference uses kBr.
+    std::set<std::string> base;
+    base.insert(std::string("-DFA_D=") + std::to_string(D));
+    base.insert(std::string("-DFA_BR=") + std::to_string(kBr));
+    std::set<std::string> opts_pf = base;
+    opts_pf.insert(std::string("-DFA_BR_H=") + std::to_string(kBrFp16));
+    std::set<std::string> opts_sm = base;
+    opts_sm.insert(std::string("-DFA_BR_H=") + std::to_string(kBrFp16Small));
+    kernel_fp32_ = runtime->buildKernel("flash_attention", "flash_attention_fp32", opts_pf);
     MLLM_RT_ASSERT(kernel_fp32_);
-    kernel_fp16_ = runtime->buildKernel("flash_attention", "flash_attention_fp16", opts);
+    kernel_fp16_ = runtime->buildKernel("flash_attention", "flash_attention_fp16", opts_pf);
     MLLM_RT_ASSERT(kernel_fp16_);
+    kernel_fp16_small_ = runtime->buildKernel("flash_attention", "flash_attention_fp16", opts_sm);
+    MLLM_RT_ASSERT(kernel_fp16_small_);
     built_for_d_ = D;
   }
 
@@ -92,10 +100,19 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
   const int causal = options_.causal_mask ? 1 : 0;
 
   std::shared_ptr<KernelWrap> kernel = nullptr;
+  int rows_per_wg = kBr;
   if (Q.dtype() == mllm::kFloat32) {
     kernel = kernel_fp32_;
+    rows_per_wg = kBr;
   } else if (Q.dtype() == mllm::kFloat16) {
-    kernel = kernel_fp16_;
+    // Big-tile prefill kernel for S_q >= threshold; small-tile for decode/tiny.
+    if (S_q >= kSmallSqThreshold) {
+      kernel = kernel_fp16_;
+      rows_per_wg = kBrFp16;
+    } else {
+      kernel = kernel_fp16_small_;
+      rows_per_wg = kBrFp16Small;
+    }
   } else {
     MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "OpenCLFlashAttention2Op supports only FP32 and FP16, got dtype={}",
                     nameOfType(Q.dtype()));
@@ -139,9 +156,8 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
               nameOfType(Q.dtype()), causal);
   }
 
-  // One work-group per (q_block, batch*head). fp16 covers kBrFp16 rows/wg (the
-  // cross-q-reuse kernel), fp32 covers kBr. local_size = D (one lane per d).
-  const int rows_per_wg = (Q.dtype() == mllm::kFloat16) ? kBrFp16 : kBr;
+  // One work-group per (q_block, batch*head). rows_per_wg matches the selected
+  // kernel's FA_BR_H (set above). local_size = D (one lane per d).
   const int q_blocks = (S_q + rows_per_wg - 1) / rows_per_wg;
   cl::NDRange global(D, q_blocks, B * H);
   cl::NDRange local(D, 1, 1);
