@@ -8,6 +8,7 @@ add_subdirectory(minicpm4)
 add_subdirectory(qwen3)
 add_subdirectory(qwen3_service)
 add_subdirectory(qwen3_moe)
+add_subdirectory(lfm2_moe)
 add_subdirectory(deepseek_ocr)
 add_subdirectory(block_selection)
 
