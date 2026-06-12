@@ -167,6 +167,7 @@ class OpenCLLoader {
   DEFINE_FUNC_PTR_MEMBER(clCreateProgramWithSource);
   DEFINE_FUNC_PTR_MEMBER(clCreateBuffer);
   DEFINE_FUNC_PTR_MEMBER(clCreateSubBuffer);
+  DEFINE_FUNC_PTR_MEMBER(clCreateImage);
   DEFINE_FUNC_PTR_MEMBER(clCreateImage2D);
   DEFINE_FUNC_PTR_MEMBER(clRetainKernel);
   DEFINE_FUNC_PTR_MEMBER(clCreateKernel);

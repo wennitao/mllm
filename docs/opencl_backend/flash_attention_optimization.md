@@ -209,31 +209,46 @@ S-scratch) is the path to multi-hundred-GF/s.
 The open risk was whether the ~1080 GF/s GEMM structure survives attention's
 **shallow K=128** (QK^T) and **narrow N=128** (P·V). Measured directly with a
 standalone variant-C GEMM microbench at FA shapes (`examples/fa_opencl_bench/`
-`gemm_vc_ref.cpp`, target `mllm-fa-gemm-vc-bench`), **buffer-operand** (the
-loader here can't create the image1d_buffer texture variant-C uses for the A
-operand):
+`gemm_vc_ref.cpp`, target `mllm-fa-gemm-vc-bench`), sweeping {buffer-A, image-A}
+× {fp16-acc, fp32-acc} (the image1d_buffer path needed `clCreateImage` added to
+`OpenCLLoader`). **Stage-1 GO/NO-GO numbers, on device (SM8750), per head and
+head-batched M=16384:**
 
-| shape | M | K | N | GF/s (buffer) |
-|---|---:|---:|---:|---:|
-| QK S=1024 | 1024 | 128 | 1024 | **326** |
-| QK S=2048 | 2048 | 128 | 2048 | **362** |
-| PV S=2048 | 2048 | 2048 | 128 | 183 |
-| ref q_proj | 1024 | 2048 | 2048 | 207 |
+| shape | M | K | N | **img/fp32-acc** | img/fp16-acc | buf/fp32-acc |
+|---|---:|---:|---:|---:|---:|---:|
+| QK S=2048 1head | 2048 | 128 | 2048 | **634** | 679 | 511 |
+| QK S=2048 H=16  | 16384| 128 | 2048 | **710** | 800 | 445 |
+| QK S=1024 H=16  | 16384| 128 | 1024 | **675** | 759 | 439 |
+| PV S=2048 1head | 2048 | 2048| 128  | **725** | 795 | 336 |
+| PV S=2048 H=16  | 16384| 2048| 128  | **896** | 1033| 413 |
+| PV S=1024 H=16  | 16384| 1024| 128  | **865** | 982 | 451 |
+| ref q_proj      | 1024 | 2048| 2048 | 936 | **1058** | 370 |
 
-**Conclusion: K=128 does NOT break the GEMM** — QK^T at K=128 is *above* the
-square reference in the same regime; the narrow-N P·V is the weaker shape (~0.85×
-ref) but does not collapse. The absolute level here is buffer-operand; the doc's
-1080 GF/s for the same kernel uses the **image1d_buffer texture path for A**
-(~5× over buffer on the reference shape), which the backend's existing
-`OpenCLLinearOp` image support provides. So the texture two-pass prefill should
-reach ~1 TF-class for QK and several-hundred GF/s for P·V — multiples over the
-fused 116. **Implementation of the full two-pass path is the next chunk**
-(QK-GEMM + fused-softmax-epilogue + P·V-GEMM kernels with image A operand,
-fp16 score scratch, causal tile-skip, op dispatch when S_q ≥ threshold).
-Stretch: int8-DP4A QK GEMM (the `block_sparse_attention.cl` recipe; ~1520 GF/s
-class) — note the fp16 backend's int8-dot capability probe reports "No" on this
-branch but `cl_khr_integer_dot_product` IS exposed (the probe checks the wrong
-ext name; fixed on `blocksparse-opencl`).
+**Decisive GO — both passes clear the 450 GF/s gate by 1.5–2× at fp32-acc.**
+Findings:
+- **fp32 accumulate is mandatory and cheap.** Only ~12% slower than fp16-acc,
+  but fp16-acc's `max_rel` is 0.1–9 (it mis-accumulates the long dot) vs fp32's
+  **4e-4**. The QK dot feeds `exp()`, so fp32-acc is non-negotiable (F2); the
+  small cost is affordable.
+- **The image1d_buffer texture A-operand is the multiplier** (1.6–2.2× over
+  buffer; the `ref q_proj` img reproduces the doc's ~1080). The win *grows* with
+  M (more rows reuse the cached A texels) → **head-batched M=H·S dispatch is
+  fastest**.
+- **K=128 does NOT collapse the GEMM**, and the narrow-N P·V is actually *faster*
+  than QK when head-batched (deep K amortizes). `CL_DEVICE_IMAGE_MAX_BUFFER_SIZE`
+  = 134M texels ≫ the A-image at any target S (S=4096 H=16 needs 524K), so F9 is
+  a non-issue.
+
+So a texture two-pass prefill should land the matmul-bound portion at ~650–900
+GF/s; net E2E after softmax-reduce + repack overhead realistically **~500–650
+GF/s @ S=2048 (≈4–5× the fused 116)**. **Stage 2 (the full three-kernel path:
+QK-GEMM w/ scale+causal+partial-stats epilogue → softmax-reduce → P·V-GEMM w/
+exp-normalize epilogue, fp16 score scratch, op dispatch S_q ≥ 512) is the next
+chunk.** Stretch: int8-DP4A QK GEMM (the `block_sparse_attention.cl` recipe;
+~1520 GF/s class) — the fp16 backend's int8-dot probe reports "No" on this branch
+but `cl_khr_integer_dot_product` IS exposed (wrong ext-name probe; fixed on
+`blocksparse-opencl`). Full corrected spec + staged plan + kill-criteria:
+the design-workflow synthesis (run `wf_91ae0fe5-6b8`).
 
 ## Earlier next steps (superseded above for decode)
 1. ~~**Dedicated decode kernel.**~~ DONE — see Session 3.
