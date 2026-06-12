@@ -153,15 +153,90 @@ reduction, and the softmax phase running on only FA_BR_H of 128 lanes. The big
 remaining levers do need real work (barrier reduction via K/V double-buffering —
 blocked by the 32 KB LDS budget at BR=32; or an HMX/dot path absent in OpenCL).
 
-## Next steps (evidence-ranked)
-1. **Dedicated decode kernel — the biggest remaining opportunity.** Decode sits
-   at ~5.5 GB/s, only ~9% of the 60 GB/s roofline (~10× headroom). The key
-   insight: at S_q=1 each K and V element is used **exactly once**, so there is
-   **no reuse** — the current kernel's global→LDS K/V tiling is pure overhead.
-   A proper decode kernel should **stream K/V straight from global** with
-   coalesced access (the same problem the LPBQ decode GEMV v6 solved via a
-   transposed `[K/4,N/4,4]` layout), all 128 lanes busy, online softmax. This is
-   a from-scratch GEMV-style kernel, not an incremental tweak.
+## Session 3 — dedicated decode kernel (5.5 → 43.7 GB/s) + prefill-1TF derisk
+
+### Decode kernel: DONE, 8.1× at S_kv=4096 (validated on device)
+
+The from-scratch decode kernel (`flash_attention_fp16_decode` + a split-K merge
+`flash_attention_fp16_decode_merge` in `flash_attention.cl`; dispatched by
+`OpenCLFlashAttention2Op` whenever `S_q==1`, fp16) lands the predicted win:
+
+| S_kv | session-2 (prefill kernel @ S_q=1) | **session-3 decode kernel** | speedup | GB/s | % of 60 GB/s |
+|---:|---:|---:|---:|---:|---:|
+| 512  | ~0.9 ms  | **0.244 ms** | 3.7× | 17.2 | 29% |
+| 1024 | 1.68 ms  | **0.397 ms** | 4.2× | 21.2 | 35% |
+| 2048 | 3.20 ms  | **0.543 ms** | 5.9× | 30.9 | 52% |
+| 4096 | 6.19 ms  | **0.768 ms** | **8.1×** | **43.7** | **73%** |
+
+Correctness vs the fp32 reference is unchanged (S_q=1, S_kv=512: max_abs
+4.75e-05). Numbers on a fresh SM8750 unit (`eb49fb9d`); the 2a38935c unit gives
+the same within ~5%.
+
+**Design.** Three structural changes vs reusing the prefill kernel at S_q=1:
+- **No K/V LDS staging.** At S_q=1 each K/V element is used exactly once — the
+  prefill kernel's global→LDS tiling is pure overhead. The decode kernel streams
+  K (score phase, lane `t` = key row, full-D dot in registers) and V (P·V phase,
+  lane `t` = output dim `d`, V read straight from global, coalesced across lanes)
+  directly from global.
+- **Zero wasted dot lanes.** All 128 lanes compute a distinct score (vs the
+  prefill kernel wasting ~3/4 of QK lanes on out-of-range rows at S_q=1).
+- **Split-K (flash-decoding).** `nsplit` partitions over S_kv (default
+  `ceil(S_kv/256)`, capped 16; env `FA_NSPLIT` to tune) fill the GPU when B·H=16
+  workgroups alone underfill it. Each partition writes an unnormalized
+  `(o, m, l)` partial to a persistent scratch `cl::Buffer` ([B·H, nsplit, D+2]
+  float); the merge kernel combines them with the standard `w_s = exp(m_s −
+  max m_s)` weighting (empty partitions carry `m=−inf` and contribute 0). At
+  `nsplit==1` the kernel normalizes and writes O directly (no scratch, no merge
+  launch). Measured: `nsplit` is a weak lever (16 marginally best at large S_kv,
+  ±5%) — the kernel is already near-roofline; the split mostly matters for
+  filling the GPU, which B·H=16 + the streaming layout already mostly achieve.
+
+Phase ablation (env `FA_DEC_PROF` = 1 scores / 2 +softmax / 3 full): scores
+alone is **48 GB/s @ S_kv=2048** (near roofline), +softmax 44, full 29 on the
+2a38935c unit — i.e. the **P·V phase (strided global V reads) is the residual
+bottleneck**, not K reads. A transposed-V or `[S_kv/4,D,4]`-packed V layout is
+the lever for the last ~25% but needs a V repack the caller doesn't do today.
+
+### Prefill → 1 TF/s: GEMM-class derisk (measured), full build still TODO
+
+The fused kernel's ~116 GF/s is a property of its 1-score-per-lane,
+4-barriers-per-tile design, **not** of the problem: at S≥1024 attention is
+compute-bound (materializing the causal score matrix costs only ~1–2 ms/pass of
+BW), and this same silicon runs the repo's fp16 GEMM at ~1080 GF/s. So a
+two-pass GEMM-class architecture (QK^T GEMM → softmax → P·V GEMM, fp16
+S-scratch) is the path to multi-hundred-GF/s.
+
+The open risk was whether the ~1080 GF/s GEMM structure survives attention's
+**shallow K=128** (QK^T) and **narrow N=128** (P·V). Measured directly with a
+standalone variant-C GEMM microbench at FA shapes (`examples/fa_opencl_bench/`
+`gemm_vc_ref.cpp`, target `mllm-fa-gemm-vc-bench`), **buffer-operand** (the
+loader here can't create the image1d_buffer texture variant-C uses for the A
+operand):
+
+| shape | M | K | N | GF/s (buffer) |
+|---|---:|---:|---:|---:|
+| QK S=1024 | 1024 | 128 | 1024 | **326** |
+| QK S=2048 | 2048 | 128 | 2048 | **362** |
+| PV S=2048 | 2048 | 2048 | 128 | 183 |
+| ref q_proj | 1024 | 2048 | 2048 | 207 |
+
+**Conclusion: K=128 does NOT break the GEMM** — QK^T at K=128 is *above* the
+square reference in the same regime; the narrow-N P·V is the weaker shape (~0.85×
+ref) but does not collapse. The absolute level here is buffer-operand; the doc's
+1080 GF/s for the same kernel uses the **image1d_buffer texture path for A**
+(~5× over buffer on the reference shape), which the backend's existing
+`OpenCLLinearOp` image support provides. So the texture two-pass prefill should
+reach ~1 TF-class for QK and several-hundred GF/s for P·V — multiples over the
+fused 116. **Implementation of the full two-pass path is the next chunk**
+(QK-GEMM + fused-softmax-epilogue + P·V-GEMM kernels with image A operand,
+fp16 score scratch, causal tile-skip, op dispatch when S_q ≥ threshold).
+Stretch: int8-DP4A QK GEMM (the `block_sparse_attention.cl` recipe; ~1520 GF/s
+class) — note the fp16 backend's int8-dot capability probe reports "No" on this
+branch but `cl_khr_integer_dot_product` IS exposed (the probe checks the wrong
+ext name; fixed on `blocksparse-opencl`).
+
+## Earlier next steps (superseded above for decode)
+1. ~~**Dedicated decode kernel.**~~ DONE — see Session 3.
 2. **Prefill is at its ceiling** for this design (~116 GF/s). Going further needs
    either barrier elimination (blocked: wave<128 so no subgroup barriers;
    double-buffer K/V overflows the 32 KB LDS at BR=32) or an HMX/dot-product path

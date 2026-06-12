@@ -7,6 +7,7 @@
 // Algorithm 1) -- the simpler version that normalizes the output every block.
 
 #include <cmath>
+#include <cstdlib>
 
 #include "mllm/backends/opencl/ops/FlashAttention2Op.hpp"
 #include "CL/cl.h"
@@ -80,6 +81,14 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
     MLLM_RT_ASSERT(kernel_fp16_);
     kernel_fp16_small_ = runtime->buildKernel("flash_attention", "flash_attention_fp16", opts_sm);
     MLLM_RT_ASSERT(kernel_fp16_small_);
+    std::set<std::string> opts_dec = base;
+    if (const char* p = std::getenv("FA_DEC_PROF")) {  // phase-ablation profiling
+      opts_dec.insert(std::string("-DFA_DEC_PROF=") + p);
+    }
+    kernel_fp16_decode_ = runtime->buildKernel("flash_attention", "flash_attention_fp16_decode", opts_dec);
+    MLLM_RT_ASSERT(kernel_fp16_decode_);
+    kernel_fp16_decode_merge_ = runtime->buildKernel("flash_attention", "flash_attention_fp16_decode_merge", base);
+    MLLM_RT_ASSERT(kernel_fp16_decode_merge_);
     built_for_d_ = D;
   }
 
@@ -98,6 +107,91 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
 
   const float scale = 1.0f / std::sqrt(static_cast<float>(D));
   const int causal = options_.causal_mask ? 1 : 0;
+
+  auto runtime_bk =
+      std::static_pointer_cast<OpenCLBackend>(mllm::Context::instance().getBackend(kOpenCL))->runtime();
+
+  // ---- Dedicated decode path (S_q == 1, fp16): split-K streaming kernel.
+  // At S_q=1 the causal mask is a no-op, K/V have zero reuse, and B*H
+  // workgroups alone underfill the GPU; the decode kernel streams K/V from
+  // global and splits S_kv across `nsplit` partitions merged by a second
+  // tiny kernel (skipped when nsplit == 1).
+  if (S_q == 1 && Q.dtype() == mllm::kFloat16) {
+    // ~256-key partitions, capped; env FA_NSPLIT overrides for tuning.
+    int nsplit = std::min((S_kv + 255) / 256, kNsplitMax);
+    if (const char* e = std::getenv("FA_NSPLIT")) {
+      const int v = std::atoi(e);
+      if (v >= 1 && v <= kNsplitMax) nsplit = v;
+    }
+    // Round the span up to a multiple of D (the kernel's key-block size);
+    // trailing empty partitions write neutral partials the merge ignores.
+    int span = (S_kv + nsplit - 1) / nsplit;
+    span = (span + D - 1) / D * D;
+
+    const size_t need = static_cast<size_t>(B) * H * kNsplitMax * (D + 2) * sizeof(float);
+    if (decode_scratch_bytes_ < need) {
+      cl_int aerr = CL_SUCCESS;
+      decode_scratch_ = cl::Buffer(runtime_bk->context(), CL_MEM_READ_WRITE, need, nullptr, &aerr);
+      MLLM_RT_ASSERT(aerr == CL_SUCCESS);
+      decode_scratch_bytes_ = need;
+    }
+
+    auto q_buf = (cl_mem)Q.impl()->ptr<void>();
+    auto k_buf = (cl_mem)K.impl()->ptr<void>();
+    auto v_buf = (cl_mem)V.impl()->ptr<void>();
+    auto o_buf = (cl_mem)O.impl()->ptr<void>();
+    auto p_buf = decode_scratch_();
+
+    cl_int err = CL_SUCCESS;
+    auto& kd = kernel_fp16_decode_->get();
+    err |= kd.setArg(0, sizeof(cl_mem), &q_buf);
+    err |= kd.setArg(1, sizeof(cl_mem), &k_buf);
+    err |= kd.setArg(2, sizeof(cl_mem), &v_buf);
+    err |= kd.setArg(3, sizeof(cl_mem), &o_buf);
+    err |= kd.setArg(4, sizeof(cl_mem), &p_buf);
+    err |= kd.setArg(5, sizeof(int), &B);
+    err |= kd.setArg(6, sizeof(int), &H);
+    err |= kd.setArg(7, sizeof(int), &S_kv);
+    err |= kd.setArg(8, sizeof(int), &D);
+    const int dq_b = qs[0], dq_h = qs[1];
+    const int dk_b = ks[0], dk_h = ks[1], dk_s = ks[2];
+    const int dv_b = vs[0], dv_h = vs[1], dv_s = vs[2];
+    err |= kd.setArg(9, sizeof(int), &dq_b);
+    err |= kd.setArg(10, sizeof(int), &dq_h);
+    err |= kd.setArg(11, sizeof(int), &dk_b);
+    err |= kd.setArg(12, sizeof(int), &dk_h);
+    err |= kd.setArg(13, sizeof(int), &dk_s);
+    err |= kd.setArg(14, sizeof(int), &dv_b);
+    err |= kd.setArg(15, sizeof(int), &dv_h);
+    err |= kd.setArg(16, sizeof(int), &dv_s);
+    err |= kd.setArg(17, sizeof(float), &scale);
+    err |= kd.setArg(18, sizeof(int), &nsplit);
+    err |= kd.setArg(19, sizeof(int), &span);
+    if (err != CL_SUCCESS) { MLLM_ERROR("FA decode setArg failed: {}", err); }
+
+    cl::NDRange dglobal(D, nsplit, B * H);
+    cl::NDRange dlocal(D, 1, 1);
+    auto e1 = runtime_bk->commandQueue().enqueueNDRangeKernel(kd, cl::NullRange, dglobal, dlocal);
+    if (e1 != CL_SUCCESS) {
+      MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "FA decode kernel enqueue failed: {}", e1);
+    }
+    if (nsplit > 1) {
+      cl_int merr = CL_SUCCESS;
+      auto& km = kernel_fp16_decode_merge_->get();
+      merr |= km.setArg(0, sizeof(cl_mem), &p_buf);
+      merr |= km.setArg(1, sizeof(cl_mem), &o_buf);
+      merr |= km.setArg(2, sizeof(int), &B);
+      merr |= km.setArg(3, sizeof(int), &H);
+      merr |= km.setArg(4, sizeof(int), &nsplit);
+      if (merr != CL_SUCCESS) { MLLM_ERROR("FA decode merge setArg failed: {}", merr); }
+      cl::NDRange mglobal(D, 1, B * H);
+      auto e2 = runtime_bk->commandQueue().enqueueNDRangeKernel(km, cl::NullRange, mglobal, dlocal);
+      if (e2 != CL_SUCCESS) {
+        MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "FA decode merge enqueue failed: {}", e2);
+      }
+    }
+    return;
+  }
 
   std::shared_ptr<KernelWrap> kernel = nullptr;
   int rows_per_wg = kBr;

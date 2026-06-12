@@ -344,3 +344,186 @@ __kernel void flash_attention_fp16(
     O[o_h_off + (q_row_start + i) * D + t] = (half)o_priv[i];
   }
 }
+
+// ---------------------------------------------------------------- fp16 decode (S_q == 1)
+//
+// Dedicated decode kernel: at S_q=1 each K/V element is used exactly ONCE, so
+// the prefill kernel's global->LDS K/V staging is pure overhead and its
+// (q-rows x keys) lane mapping wastes 3/4 of the QK lanes. This kernel streams
+// K/V straight from global with no K/V LDS tiles:
+//
+//   score phase: lane t owns key row (bs + t)  -> full D-dot in registers, no
+//                cross-lane reduction. Across a wave the row base addresses
+//                stride by D*2 bytes, but each lane walks its row sequentially
+//                (vload8), so every touched cache line is fully consumed --
+//                the L1/UCHE absorbs the interleave (verified GEMV-style).
+//   softmax:     one producer lane per block, float8-vectorized, online (m,l)
+//                with the rescale factor a broadcast via LDS.
+//   P*V phase:   lane t owns output dim d=t; V rows read straight from global,
+//                coalesced across lanes; probs broadcast from LDS.
+//
+// 3 barriers per FA_D-key block (vs 4 per FA_BC_H=32 keys in the prefill
+// kernel = ~5x fewer per key), zero wasted dot lanes.
+//
+// Split-K (flash-decoding): grid dim1 = nsplit partitions over S_kv. Each
+// workgroup writes an UNNORMALIZED partial (o_acc scaled to its running max,
+// plus m, l) to `partial` [B*H, nsplit, FA_D+2] (float); the merge kernel
+// below combines partitions. With nsplit == 1 the kernel normalizes and
+// writes O directly (no scratch, no merge launch).
+//
+// S_q==1 makes the causal mask a no-op (every key index <= S_kv-1 = q_pos),
+// so no mask test is needed. Accumulators and softmax stats stay fp32.
+
+__kernel void flash_attention_fp16_decode(
+    __global const half *Q, __global const half *K, __global const half *V,
+    __global half *O, __global float *partial,
+    const int B, const int H, const int S_kv, const int D,
+    const int Q_b_stride, const int Q_h_stride,
+    const int K_b_stride, const int K_h_stride, const int K_s_stride,
+    const int V_b_stride, const int V_h_stride, const int V_s_stride,
+    const float scale, const int nsplit, const int span) {
+  const int t = get_local_id(0);   // 0..FA_D-1
+  const int split = get_global_id(1);
+  const int bh = get_global_id(2);
+  if (bh >= B * H) return;
+
+  const int b = bh / H;
+  const int h = bh - b * H;
+  const int q_off = b * Q_b_stride + h * Q_h_stride;
+  const int k_h_off = b * K_b_stride + h * K_h_stride;
+  const int v_h_off = b * V_b_stride + h * V_h_stride;
+
+  const int kv_begin = split * span;
+  const int kv_end = min(S_kv, kv_begin + span);
+  const int pbase = (bh * nsplit + split) * (FA_D + 2);
+
+  if (kv_begin >= kv_end) {  // empty partition: still write a neutral partial
+    if (nsplit > 1) {
+      partial[pbase + t] = 0.0f;
+      if (t == 0) {
+        partial[pbase + FA_D] = -INFINITY;
+        partial[pbase + FA_D + 1] = 0.0f;
+      }
+    }
+    return;
+  }
+
+  __local half  Q_l[FA_D];
+  __local float S_l[FA_D];     // one block of scores -> probs (in place)
+  __local float sh_a;          // per-block rescale factor exp(m_old - m_new)
+
+  Q_l[t] = Q[q_off + t];
+  float o_acc = 0.0f;          // lane t's UNNORMALIZED output dim d=t
+  float m_run = -INFINITY;     // tracked by lane 0 (authoritative)
+  float l_run = 0.0f;
+  barrier(CLK_LOCAL_MEM_FENCE);
+
+  for (int bs = kv_begin; bs < kv_end; bs += FA_D) {
+    const int blk_n = min(FA_D, kv_end - bs);
+
+    // ---- scores: lane t -> key row bs+t (full-depth dot, fp32 accumulate)
+    {
+      float s = -INFINITY;
+      if (t < blk_n) {
+        __global const half *krow = K + k_h_off + (long)(bs + t) * K_s_stride;
+        float8 acc = (float8)(0.0f);
+        #pragma unroll
+        for (int d8 = 0; d8 < FA_D / 8; ++d8) {
+          acc += convert_float8(vload8(d8, Q_l)) * convert_float8(vload8(d8, krow));
+        }
+        s = (acc.s0 + acc.s1 + acc.s2 + acc.s3 +
+             acc.s4 + acc.s5 + acc.s6 + acc.s7) * scale;
+      }
+      S_l[t] = s;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // ---- online softmax: producer lane 0, float8-vectorized over the block
+    // (FA_DEC_PROF ablation: 1 = scores only, 2 = +softmax, 3/unset = full)
+#if defined(FA_DEC_PROF) && FA_DEC_PROF < 2
+    if (t == 0) { sh_a = S_l[t]; m_run = fmax(m_run, S_l[0]); l_run += 1.0f; }
+#else
+    if (t == 0) {
+      float8 m8 = (float8)(-INFINITY);
+      for (int c8 = 0; c8 < FA_D / 8; ++c8) m8 = fmax(m8, vload8(c8, S_l));
+      float4 m4 = fmax(m8.lo, m8.hi);
+      float2 m2 = fmax(m4.lo, m4.hi);
+      const float m_tilde = fmax(m2.s0, m2.s1);
+      const float m_new = fmax(m_run, m_tilde);
+      const float a = (m_run == -INFINITY) ? 0.0f : native_exp(m_run - m_new);
+      float8 l8 = (float8)(0.0f);
+      for (int c8 = 0; c8 < FA_D / 8; ++c8) {
+        const float8 s8 = vload8(c8, S_l);
+        const float8 p8 = select(native_exp(s8 - m_new), (float8)(0.0f), isinf(s8));
+        vstore8(p8, c8, S_l);
+        l8 += p8;
+      }
+      float4 l4 = l8.lo + l8.hi;
+      float2 l2 = l4.lo + l4.hi;
+      l_run = a * l_run + (l2.s0 + l2.s1);
+      m_run = m_new;
+      sh_a = a;
+    }
+#endif
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // ---- P*V: lane t = output dim t; V coalesced across lanes
+#if defined(FA_DEC_PROF) && FA_DEC_PROF < 3
+    o_acc += sh_a + S_l[t & (FA_D - 1)];  // keep prior phases live, skip PV
+#else
+    {
+      const float a = sh_a;
+      float pv = 0.0f;
+      __global const half *vbase = V + v_h_off + (long)bs * V_s_stride + t;
+      #pragma unroll 8
+      for (int c = 0; c < blk_n; ++c) {
+        pv += S_l[c] * (float)vbase[(long)c * V_s_stride];
+      }
+      o_acc = o_acc * a + pv;
+    }
+#endif
+    barrier(CLK_LOCAL_MEM_FENCE);  // S_l reused next block
+  }
+
+  if (nsplit == 1) {
+    // Single partition: normalize and write O directly (skip scratch+merge).
+    // l_run is authoritative on lane 0 only -> broadcast via LDS (reuse sh_a).
+    if (t == 0) sh_a = l_run;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    const float l_all = sh_a;
+    O[bh * FA_D + t] = (half)((l_all > 0.0f) ? o_acc / l_all : 0.0f);
+  } else {
+    partial[pbase + t] = o_acc;
+    if (t == 0) {
+      partial[pbase + FA_D] = m_run;
+      partial[pbase + FA_D + 1] = l_run;
+    }
+  }
+}
+
+// Merge nsplit partials -> O. Dispatch: global (FA_D, 1, B*H), local (FA_D,1,1).
+// partial layout: [B*H, nsplit, FA_D+2] float; slot FA_D = m, FA_D+1 = l.
+// Standard flash-decoding merge: O = sum_s w_s*o_s / sum_s w_s*l_s with
+// w_s = exp(m_s - max_s m_s); empty partitions (m = -inf) contribute 0.
+__kernel void flash_attention_fp16_decode_merge(
+    __global const float *partial, __global half *O,
+    const int B, const int H, const int nsplit) {
+  const int t = get_local_id(0);
+  const int bh = get_global_id(2);
+  if (bh >= B * H) return;
+  const int base = bh * nsplit * (FA_D + 2);
+
+  float m_max = -INFINITY;
+  for (int s = 0; s < nsplit; ++s) {
+    m_max = fmax(m_max, partial[base + s * (FA_D + 2) + FA_D]);
+  }
+  float num = 0.0f, den = 0.0f;
+  for (int s = 0; s < nsplit; ++s) {
+    const float m_s = partial[base + s * (FA_D + 2) + FA_D];
+    if (m_s == -INFINITY) continue;
+    const float w = native_exp(m_s - m_max);
+    num += w * partial[base + s * (FA_D + 2) + t];
+    den += w * partial[base + s * (FA_D + 2) + FA_D + 1];
+  }
+  O[bh * FA_D + t] = (half)((den > 0.0f) ? num / den : 0.0f);
+}

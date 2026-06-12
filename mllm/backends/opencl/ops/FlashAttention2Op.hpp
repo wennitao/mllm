@@ -30,13 +30,21 @@ class OpenCLFlashAttention2Op final : public aops::FlashAttention2Op {
   int built_for_d_ = 0;
   std::shared_ptr<KernelWrap> kernel_fp32_ = nullptr;
   std::shared_ptr<KernelWrap> kernel_fp16_ = nullptr;        // prefill (big tile)
-  std::shared_ptr<KernelWrap> kernel_fp16_small_ = nullptr;  // decode / tiny S_q
+  std::shared_ptr<KernelWrap> kernel_fp16_small_ = nullptr;  // tiny S_q (2..31)
+  std::shared_ptr<KernelWrap> kernel_fp16_decode_ = nullptr;       // S_q == 1 (split-K stream)
+  std::shared_ptr<KernelWrap> kernel_fp16_decode_merge_ = nullptr; // split-K partial merge
+
+  // Split-K scratch for the decode kernel: [B*H, nsplit, D+2] float partials.
+  // Grow-only; persists across forwards.
+  cl::Buffer decode_scratch_;
+  size_t decode_scratch_bytes_ = 0;
 
   // Tile sizes — must match the kernel macros (FA_BR_H).
   static constexpr int kBr = 4;             // fp32 reference: q-rows per workgroup
   static constexpr int kBrFp16 = 32;        // fp16 prefill: q-rows per wg (max cross-q reuse)
   static constexpr int kBrFp16Small = 4;    // fp16 decode/tiny S_q: q-rows per wg
   static constexpr int kSmallSqThreshold = 32;  // S_q < this -> use the small-tile kernel
+  static constexpr int kNsplitMax = 16;     // decode split-K partition cap
 };
 
 class OpenCLFlashAttention2OpFactory : public TypedOpFactory<OpTypes::kFlashAttention2, aops::FlashAttention2OpOptions> {
