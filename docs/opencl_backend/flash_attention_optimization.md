@@ -286,11 +286,37 @@ pack/trans pre-passes (~1 ms) could fold into the GEMM loads. **Stretch (Stage
 3): int8-DP4A QK GEMM** (the `block_sparse_attention.cl` recipe; ~1520 GF/s
 class) — the fp16 backend's int8-dot probe reports "No" on this branch but
 `cl_khr_integer_dot_product` IS exposed (wrong ext-name probe; fixed on
-`blocksparse-opencl`). **Productionization:** wire the pipeline into
-`OpenCLFlashAttention2Op` for S_q ≥ 512 (decode keeps the Session-3 kernel,
-tiny/unaligned S keeps the fused kernel). Full spec + kill-criteria: the
-design-workflow synthesis (run `wf_91ae0fe5-6b8`); index algebra was
-adversarially pre-verified (run `wf_e922fa30-b22`, emulation max-abs 0.0).
+`blocksparse-opencl`). Index algebra was adversarially pre-verified (run
+`wf_e922fa30-b22`, emulation max-abs 0.0); full spec + kill-criteria in the
+design synthesis (run `wf_91ae0fe5-6b8`).
+
+### Productionized into `OpenCLFlashAttention2Op` (validated on device)
+
+The pipeline is wired into the op and the model uses it automatically. Dispatch
+in `forward()`:
+- **S_q == 1** → the Session-3 split-K decode kernel.
+- **S_q ≥ 512, fp16, D == 128, causal, S_q%8==S_kv%8==0** → two-pass GEMM.
+- everything else (tiny/unaligned/non-causal/fp32) → the fused kernel.
+
+The 6 kernels live in `flash_attention.cl` (prefixed `tp_`); three stride-aware
+pre-passes (`tp_pack_q`/`tp_trans_k`/`tp_copy_v`) compact the **real strided
+KV-cache tensors** into contiguous intermediates so the compute kernels run on
+dense data. Scratch (Qp/Kt/Vc/S) is grow-only persistent `cl::Buffer`s; the
+Kt/Vc `image1d_buffer`s are cached members rebuilt only when a buffer grows
+(no per-forward image recreate, **no per-call `clFinish`** — the op pipelines
+with adjacent ops like the fused path). All B·H batched via grid dim 2.
+
+Measured **through the op** (fp16, `mllm-fa-opencl-bench`):
+
+| S | op two-pass | fused | speedup |
+|---:|---:|---:|---:|
+| 256 | (fused, 90 GF/s) | — | — (below threshold) |
+| 1024 | 6.5 ms / **673 GF/s** | 38.7 ms / 111 | **5.9×** |
+| 2048 | 21.1 ms / **813 GF/s** | 148 ms / 116 | **7.0×** |
+
+Validated vs the fp32 fused kernel: S=512/1024 max_abs 5.6e-4, chunked
+S_q=512<S_kv=1024 max_abs 5.9e-5 (consistent with every other fp16 path; no
+NaN). Small/unaligned S correctly fall through to the fused kernel.
 
 ## Earlier next steps (superseded above for decode)
 1. ~~**Dedicated decode kernel.**~~ DONE — see Session 3.

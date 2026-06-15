@@ -21,6 +21,7 @@ namespace mllm::opencl {
 class OpenCLFlashAttention2Op final : public aops::FlashAttention2Op {
  public:
   explicit OpenCLFlashAttention2Op(const aops::FlashAttention2OpOptions& options);
+  ~OpenCLFlashAttention2Op();
 
   void forward(const std::vector<Tensor>& inputs, std::vector<Tensor>& outputs) override;
 
@@ -34,10 +35,32 @@ class OpenCLFlashAttention2Op final : public aops::FlashAttention2Op {
   std::shared_ptr<KernelWrap> kernel_fp16_decode_ = nullptr;       // S_q == 1 (split-K stream)
   std::shared_ptr<KernelWrap> kernel_fp16_decode_merge_ = nullptr; // split-K partial merge
 
+  // Two-pass GEMM-class prefill kernels (S_q >= kTwoPassThreshold, fp16, D==FA_D).
+  std::shared_ptr<KernelWrap> tp_pack_q_ = nullptr;
+  std::shared_ptr<KernelWrap> tp_trans_k_ = nullptr;
+  std::shared_ptr<KernelWrap> tp_copy_v_ = nullptr;
+  std::shared_ptr<KernelWrap> tp_qk_ = nullptr;
+  std::shared_ptr<KernelWrap> tp_softmax_ = nullptr;
+  std::shared_ptr<KernelWrap> tp_pv_ = nullptr;
+
   // Split-K scratch for the decode kernel: [B*H, nsplit, D+2] float partials.
   // Grow-only; persists across forwards.
   cl::Buffer decode_scratch_;
   size_t decode_scratch_bytes_ = 0;
+
+  // Two-pass prefill scratch (grow-only, persist across forwards): contiguous
+  // Qp[B*H,D/4,Sq,4], Kt[B*H,D,Skv], Vc[B*H,Skv,D], S[B*H,Sq,Skv] (all fp16).
+  cl::Buffer tp_qp_, tp_kt_, tp_vc_, tp_s_;
+  size_t tp_qp_b_ = 0, tp_kt_b_ = 0, tp_vc_b_ = 0, tp_s_b_ = 0;
+  // image1d_buffer wrappers over Kt/Vc, recreated only when those buffers grow
+  // (so no per-forward image recreate / clFinish). Released in the destructor.
+  cl_mem tp_kt_img_ = nullptr, tp_vc_img_ = nullptr;
+
+  bool tryForwardTwoPass(const Tensor& Q, const Tensor& K, const Tensor& V, Tensor& O,
+                         int B, int H, int S_q, int S_kv, int D, float scale, int causal);
+
+  static constexpr int kTwoPassThreshold = 512;  // S_q >= this -> two-pass prefill
+  static constexpr int kTpSmLw = 64;             // must match TP_SM_LW in the kernel
 
   // Tile sizes — must match the kernel macros (FA_BR_H).
   static constexpr int kBr = 4;             // fp32 reference: q-rows per workgroup

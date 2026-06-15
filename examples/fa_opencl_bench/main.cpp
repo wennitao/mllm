@@ -285,6 +285,12 @@ MLLM_MAIN({
     // prefill path (and its partial-block handling).
     validate_fp16_vs_fp32({kB, kH, 20, 20, kD, "val"});
     validate_fp16_vs_fp32({kB, kH, 7, 40, kD, "val"});
+    // Large S_q (>= 512, mult of 8) routes fp16 through the TWO-PASS GEMM
+    // prefill path; compared against the fp32 fused kernel. Includes a chunked
+    // S_q < S_kv case (causal offset).
+    validate_fp16_vs_fp32({kB, kH, 512, 512, kD, "val-2pass"});
+    validate_fp16_vs_fp32({kB, kH, 1024, 1024, kD, "val-2pass"});
+    validate_fp16_vs_fp32({kB, kH, 512, 1024, kD, "val-2pass-chunked"});
     std::printf("\n");
   }
 

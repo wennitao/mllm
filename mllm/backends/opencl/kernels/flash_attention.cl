@@ -527,3 +527,203 @@ __kernel void flash_attention_fp16_decode_merge(
   }
   O[bh * FA_D + t] = (half)((den > 0.0f) ? num / den : 0.0f);
 }
+
+// ============================================================================
+// Two-pass GEMM-class PREFILL (S_q large, causal). Reuses the validated
+// variant-C 8x4 image-A / packed-B GEMM for QK^T and P*V with a query-major
+// fp16 score scratch + in-place softmax (no score-matrix transpose). Three
+// stride-aware pre-passes compact the real (strided) Q/K/V into contiguous
+// intermediates so the compute kernels run on dense data. All batch B*H via
+// grid dim 2 (bh). Requires FA_D % 4 == 0; D == FA_D (128 typical).
+// See docs/opencl_backend/flash_attention_optimization.md (Stage 2).
+// ============================================================================
+
+// pack_q: strided Q[b,h,q,:] -> contiguous Qp[bh][32, Sq, 4] (QK B-operand).
+// global=(Sq, FA_D/4, B*H).
+__kernel void tp_pack_q(__global const half* Q, __global half* Qp,
+                        const int B, const int H, const int Sq,
+                        const int Qbs, const int Qhs, const int Qss) {
+  const int q = get_global_id(0);
+  const int g = get_global_id(1);
+  const int bh = get_global_id(2);
+  if (q >= Sq || g >= FA_D / 4 || bh >= B * H) return;
+  const int b = bh / H, h = bh - b * H;
+  __global const half* src = Q + (long)b * Qbs + (long)h * Qhs + (long)q * Qss;
+  __global half* dst = Qp + (long)bh * (FA_D / 4) * Sq * 4;
+  const int sd = g * 4;
+  #pragma unroll
+  for (int kk = 0; kk < 4; ++kk) dst[((long)g * Sq + q) * 4 + kk] = src[sd + kk];
+}
+
+// trans_k: strided K[b,h,k,:] -> contiguous Kt[bh][FA_D, Skv] (QK A-image).
+// global=(Skv, FA_D, B*H).
+__kernel void tp_trans_k(__global const half* K, __global half* Kt,
+                         const int B, const int H, const int Skv,
+                         const int Kbs, const int Khs, const int Kss) {
+  const int k = get_global_id(0);
+  const int d = get_global_id(1);
+  const int bh = get_global_id(2);
+  if (k >= Skv || d >= FA_D || bh >= B * H) return;
+  const int b = bh / H, h = bh - b * H;
+  Kt[(long)bh * FA_D * Skv + (long)d * Skv + k] =
+      K[(long)b * Kbs + (long)h * Khs + (long)k * Kss + d];
+}
+
+// copy_v: strided V[b,h,k,:] -> contiguous Vc[bh][Skv, FA_D] (PV A-image, natural).
+// global=(Skv, FA_D, B*H).
+__kernel void tp_copy_v(__global const half* V, __global half* Vc,
+                        const int B, const int H, const int Skv,
+                        const int Vbs, const int Vhs, const int Vss) {
+  const int k = get_global_id(0);
+  const int d = get_global_id(1);
+  const int bh = get_global_id(2);
+  if (k >= Skv || d >= FA_D || bh >= B * H) return;
+  const int b = bh / H, h = bh - b * H;
+  Vc[(long)bh * Skv * FA_D + (long)k * FA_D + d] =
+      V[(long)b * Vbs + (long)h * Vhs + (long)k * Vss + d];
+}
+
+// tp_qk_gemm: S[q,k] = scale * (Q[q,:].K[k,:]) + causal mask + clamp, query-major.
+// A = Kt image [R=d, M=k=Skv]; B = Qp packed [d/4, q=N=Sq, 4]. global=(Skv/8, Sq/4, B*H).
+#ifndef TP_CLAMP
+#define TP_CLAMP 60000.0f
+#endif
+__kernel void tp_qk_gemm(__read_only image1d_buffer_t Kt_img,
+                         __global const half* Qp, __global half* S,
+                         const int Sq, const int Skv, const int BH,
+                         const float scale, const int causal) {
+  const int gy = get_global_id(0);
+  const int gx = get_global_id(1);
+  const int bh = get_global_id(2);
+  const int M = Skv, N = Sq;
+  if (gy * 8 >= M || gx * 4 >= N || bh >= BH) return;
+  const int gx_4 = gx << 2, gy_8 = gy << 3, M_4 = M >> 2;
+
+  const int kt_tex_base = bh * FA_D * (M >> 2);
+  __global const half* Qph = Qp + (long)bh * (FA_D / 4) * N * 4;
+  __global half* Sh = S + (long)bh * (long)Sq * Skv;
+
+  if (causal && gy_8 > (Skv - Sq) + gx_4 + 3) {
+    #define TPINF(NN) { const int q = gx_4 + (NN); if (q < N) vstore8((half8)(-INFINITY), 0, Sh + (long)q * Skv + gy_8); }
+    TPINF(0); TPINF(1); TPINF(2); TPINF(3);
+    #undef TPINF
+    return;
+  }
+
+  float8 c0 = (float8)0, c1 = (float8)0, c2 = (float8)0, c3 = (float8)0;
+  half8 B0, B1, B2, B3;
+  for (int i = 0; i < FA_D; i += 4) {
+    const int t = kt_tex_base + gy * 2 + i * M_4;
+    B0.s0123 = read_imageh(Kt_img, t);       B0.s4567 = read_imageh(Kt_img, t + 1);
+    const int t1 = kt_tex_base + gy * 2 + (i + 1) * M_4;
+    B1.s0123 = read_imageh(Kt_img, t1);      B1.s4567 = read_imageh(Kt_img, t1 + 1);
+    const int t2 = kt_tex_base + gy * 2 + (i + 2) * M_4;
+    B2.s0123 = read_imageh(Kt_img, t2);      B2.s4567 = read_imageh(Kt_img, t2 + 1);
+    const int t3 = kt_tex_base + gy * 2 + (i + 3) * M_4;
+    B3.s0123 = read_imageh(Kt_img, t3);      B3.s4567 = read_imageh(Kt_img, t3 + 1);
+    half16 w = vload16(0, Qph + ((long)(i >> 2) * N + gx_4) * 4);
+    const float8 b0 = convert_float8(B0), b1 = convert_float8(B1), b2 = convert_float8(B2), b3 = convert_float8(B3);
+    c0 += b0 * w.s0; c0 += b1 * w.s1; c0 += b2 * w.s2; c0 += b3 * w.s3;
+    c1 += b0 * w.s4; c1 += b1 * w.s5; c1 += b2 * w.s6; c1 += b3 * w.s7;
+    c2 += b0 * w.s8; c2 += b1 * w.s9; c2 += b2 * w.sa; c2 += b3 * w.sb;
+    c3 += b0 * w.sc; c3 += b1 * w.sd; c3 += b2 * w.se; c3 += b3 * w.sf;
+  }
+  #define TPEMIT(NN, CV) {                                                  \
+    const int q = gx_4 + (NN);                                            \
+    if (q < N) {                                                          \
+      const int q_pos = (Skv - Sq) + q;                                  \
+      float8 v = (CV) * scale; half8 hv;                                 \
+      hv.s0 = (half)((causal && (gy_8+0) > q_pos) ? -INFINITY : clamp(v.s0,-TP_CLAMP,TP_CLAMP)); \
+      hv.s1 = (half)((causal && (gy_8+1) > q_pos) ? -INFINITY : clamp(v.s1,-TP_CLAMP,TP_CLAMP)); \
+      hv.s2 = (half)((causal && (gy_8+2) > q_pos) ? -INFINITY : clamp(v.s2,-TP_CLAMP,TP_CLAMP)); \
+      hv.s3 = (half)((causal && (gy_8+3) > q_pos) ? -INFINITY : clamp(v.s3,-TP_CLAMP,TP_CLAMP)); \
+      hv.s4 = (half)((causal && (gy_8+4) > q_pos) ? -INFINITY : clamp(v.s4,-TP_CLAMP,TP_CLAMP)); \
+      hv.s5 = (half)((causal && (gy_8+5) > q_pos) ? -INFINITY : clamp(v.s5,-TP_CLAMP,TP_CLAMP)); \
+      hv.s6 = (half)((causal && (gy_8+6) > q_pos) ? -INFINITY : clamp(v.s6,-TP_CLAMP,TP_CLAMP)); \
+      hv.s7 = (half)((causal && (gy_8+7) > q_pos) ? -INFINITY : clamp(v.s7,-TP_CLAMP,TP_CLAMP)); \
+      vstore8(hv, 0, Sh + (long)q * Skv + gy_8);                         \
+    } }
+  TPEMIT(0, c0); TPEMIT(1, c1); TPEMIT(2, c2); TPEMIT(3, c3);
+  #undef TPEMIT
+}
+
+// tp_softmax_norm: per (bh,q) row of S, normalize IN PLACE -> P query-major.
+// global=(TP_SM_LW, Sq, B*H), local=(TP_SM_LW,1,1).
+#ifndef TP_SM_LW
+#define TP_SM_LW 64
+#endif
+inline int tp_causal_row(int Sq, int Skv, int q) { return min(Skv - 1, (Skv - Sq) + q); }
+__kernel void tp_softmax_norm(__global half* S, const int Sq, const int Skv, const int BH) {
+  const int t = get_local_id(0);
+  const int q = get_global_id(1);
+  const int bh = get_global_id(2);
+  if (q >= Sq || bh >= BH) return;
+  __global half* Sh = S + (long)bh * Sq * Skv + (long)q * Skv;
+  __local float red[TP_SM_LW];
+  const int kcap = tp_causal_row(Sq, Skv, q);
+
+  float m = -INFINITY;
+  for (int k = t; k <= kcap; k += TP_SM_LW) { float s = (float)Sh[k]; if (!isinf(s)) m = fmax(m, s); }
+  red[t] = m; barrier(CLK_LOCAL_MEM_FENCE);
+  for (int o = TP_SM_LW >> 1; o > 0; o >>= 1) { if (t < o) red[t] = fmax(red[t], red[t + o]); barrier(CLK_LOCAL_MEM_FENCE); }
+  m = red[0]; barrier(CLK_LOCAL_MEM_FENCE);
+
+  float l = 0.0f;
+  if (!isinf(m)) for (int k = t; k <= kcap; k += TP_SM_LW) { float s = (float)Sh[k]; l += isinf(s) ? 0.0f : native_exp(s - m); }
+  red[t] = l; barrier(CLK_LOCAL_MEM_FENCE);
+  for (int o = TP_SM_LW >> 1; o > 0; o >>= 1) { if (t < o) red[t] = red[t] + red[t + o]; barrier(CLK_LOCAL_MEM_FENCE); }
+  l = red[0];
+  const float inv = (l > 0.0f) ? (1.0f / l) : 0.0f;
+
+  for (int k = t; k < Skv; k += TP_SM_LW) {
+    float s = (float)Sh[k];
+    Sh[k] = (half)((isinf(m) || isinf(s)) ? 0.0f : native_exp(s - m) * inv);
+  }
+}
+
+// tp_pv_gemm: O[q,d] = sum_k P[q,k] V[k,d]. A = Vc image [R=k, M=d=FA_D];
+// B = P query-major (in place in S) read direct via 4x vload4. causal reduction
+// bound per n-tile. global=(FA_D/8, Sq/4, B*H). O contiguous [B*H, Sq, FA_D].
+__kernel void tp_pv_gemm(__read_only image1d_buffer_t V_img,
+                         __global const half* P, __global half* O,
+                         const int Sq, const int Skv, const int BH, const int causal) {
+  const int gy = get_global_id(0);
+  const int gx = get_global_id(1);
+  const int bh = get_global_id(2);
+  const int M = FA_D, N = Sq;
+  if (gy * 8 >= M || gx * 4 >= N || bh >= BH) return;
+  const int gx_4 = gx << 2, gy_8 = gy << 3, M_4 = M >> 2;
+
+  int kmax = Skv;
+  if (causal) { const int qpm = (Skv - Sq) + gx_4 + 3; kmax = min(Skv, (qpm + 4) & ~3); }
+
+  const int v_tex_base = bh * Skv * (FA_D >> 2);
+  __global const half* Ph = P + (long)bh * (long)Sq * Skv;
+  __global half* Oh = O + (long)bh * (long)Sq * FA_D;
+  __global const half* p0r = Ph + (long)(gx_4 + 0) * Skv;
+  __global const half* p1r = Ph + (long)(gx_4 + 1) * Skv;
+  __global const half* p2r = Ph + (long)(gx_4 + 2) * Skv;
+  __global const half* p3r = Ph + (long)(gx_4 + 3) * Skv;
+
+  float8 c0 = (float8)0, c1 = (float8)0, c2 = (float8)0, c3 = (float8)0;
+  half8 B0, B1, B2, B3;
+  for (int i = 0; i < kmax; i += 4) {
+    const int t = v_tex_base + gy * 2 + i * M_4;
+    B0.s0123 = read_imageh(V_img, t);        B0.s4567 = read_imageh(V_img, t + 1);
+    const int t1 = v_tex_base + gy * 2 + (i + 1) * M_4;
+    B1.s0123 = read_imageh(V_img, t1);       B1.s4567 = read_imageh(V_img, t1 + 1);
+    const int t2 = v_tex_base + gy * 2 + (i + 2) * M_4;
+    B2.s0123 = read_imageh(V_img, t2);       B2.s4567 = read_imageh(V_img, t2 + 1);
+    const int t3 = v_tex_base + gy * 2 + (i + 3) * M_4;
+    B3.s0123 = read_imageh(V_img, t3);       B3.s4567 = read_imageh(V_img, t3 + 1);
+    half4 p0 = vload4(0, p0r + i), p1 = vload4(0, p1r + i), p2 = vload4(0, p2r + i), p3 = vload4(0, p3r + i);
+    const float8 b0 = convert_float8(B0), b1 = convert_float8(B1), b2 = convert_float8(B2), b3 = convert_float8(B3);
+    c0 += b0 * p0.s0; c0 += b1 * p0.s1; c0 += b2 * p0.s2; c0 += b3 * p0.s3;
+    c1 += b0 * p1.s0; c1 += b1 * p1.s1; c1 += b2 * p1.s2; c1 += b3 * p1.s3;
+    c2 += b0 * p2.s0; c2 += b1 * p2.s1; c2 += b2 * p2.s2; c2 += b3 * p2.s3;
+    c3 += b0 * p3.s0; c3 += b1 * p3.s1; c3 += b2 * p3.s2; c3 += b3 * p3.s3;
+  }
+  #define TPEMITO(NN, CV) { const int q = gx_4 + (NN); if (q < N) vstore8(convert_half8(CV), 0, Oh + (long)q * FA_D + gy_8); }
+  TPEMITO(0, c0); TPEMITO(1, c1); TPEMITO(2, c2); TPEMITO(3, c3);
+  #undef TPEMITO
+}

@@ -32,6 +32,11 @@ OpenCLFlashAttention2Op::OpenCLFlashAttention2Op(const aops::FlashAttention2OpOp
   }
 }
 
+OpenCLFlashAttention2Op::~OpenCLFlashAttention2Op() {
+  if (tp_kt_img_) clReleaseMemObject(tp_kt_img_);
+  if (tp_vc_img_) clReleaseMemObject(tp_vc_img_);
+}
+
 void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::vector<Tensor>& outputs) {
   auto& Q = inputs[0];
   auto& K = inputs[1];
@@ -89,6 +94,16 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
     MLLM_RT_ASSERT(kernel_fp16_decode_);
     kernel_fp16_decode_merge_ = runtime->buildKernel("flash_attention", "flash_attention_fp16_decode_merge", base);
     MLLM_RT_ASSERT(kernel_fp16_decode_merge_);
+    // Two-pass GEMM-class prefill kernels (only viable for D == FA_D == 128).
+    if (D == 128) {
+      tp_pack_q_ = runtime->buildKernel("flash_attention", "tp_pack_q", base);
+      tp_trans_k_ = runtime->buildKernel("flash_attention", "tp_trans_k", base);
+      tp_copy_v_ = runtime->buildKernel("flash_attention", "tp_copy_v", base);
+      tp_qk_ = runtime->buildKernel("flash_attention", "tp_qk_gemm", base);
+      tp_softmax_ = runtime->buildKernel("flash_attention", "tp_softmax_norm", base);
+      tp_pv_ = runtime->buildKernel("flash_attention", "tp_pv_gemm", base);
+      MLLM_RT_ASSERT(tp_pack_q_ && tp_trans_k_ && tp_copy_v_ && tp_qk_ && tp_softmax_ && tp_pv_);
+    }
     built_for_d_ = D;
   }
 
@@ -193,6 +208,14 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
     return;
   }
 
+  // ---- Two-pass GEMM-class prefill (large causal S_q, fp16, D==128, aligned).
+  // ~7x the fused kernel at S>=1024 and runs S=4096 (which the fused kernel
+  // can't). Falls back to the fused kernel for unaligned / non-causal shapes.
+  if (Q.dtype() == mllm::kFloat16 && D == 128 && options_.causal_mask &&
+      S_q >= kTwoPassThreshold && (S_q & 7) == 0 && (S_kv & 7) == 0 && tp_qk_) {
+    if (tryForwardTwoPass(Q, K, V, O, B, H, S_q, S_kv, D, scale, causal)) return;
+  }
+
   std::shared_ptr<KernelWrap> kernel = nullptr;
   int rows_per_wg = kBr;
   if (Q.dtype() == mllm::kFloat32) {
@@ -259,6 +282,98 @@ void OpenCLFlashAttention2Op::forward(const std::vector<Tensor>& inputs, std::ve
   if (error != CL_SUCCESS) {
     MLLM_ERROR_EXIT(ExitCode::kOpenCLError, "Failed to enqueue OpenCL FlashAttention kernel, error code: {}", error);
   }
+}
+
+bool OpenCLFlashAttention2Op::tryForwardTwoPass(const Tensor& Q, const Tensor& K, const Tensor& V, Tensor& O,
+                                                int B, int H, int S_q, int S_kv, int D, float scale, int causal) {
+  auto rt = std::static_pointer_cast<OpenCLBackend>(mllm::Context::instance().getBackend(kOpenCL))->runtime();
+  auto ctx = rt->context();
+  const int BH = B * H;
+
+  // Grow-only scratch (fp16). Qp[BH,D/4,Sq,4], Kt[BH,D,Skv], Vc[BH,Skv,D], S[BH,Sq,Skv].
+  // `grew` is set if the buffer was (re)allocated, so the dependent image is rebuilt.
+  auto ensure = [&](cl::Buffer& buf, size_t& cur, size_t need, bool& grew) {
+    grew = false;
+    if (cur < need) {
+      cl_int e = CL_SUCCESS;
+      buf = cl::Buffer(ctx, CL_MEM_READ_WRITE, need, nullptr, &e);
+      if (e != CL_SUCCESS) { MLLM_ERROR("FA two-pass scratch alloc failed: {}", e); return false; }
+      cur = need;
+      grew = true;
+    }
+    return true;
+  };
+  const size_t hb = sizeof(uint16_t);
+  bool g_qp = false, g_kt = false, g_vc = false, g_s = false;
+  if (!ensure(tp_qp_, tp_qp_b_, (size_t)BH * (D / 4) * S_q * 4 * hb, g_qp)) return false;
+  if (!ensure(tp_kt_, tp_kt_b_, (size_t)BH * D * S_kv * hb, g_kt)) return false;
+  if (!ensure(tp_vc_, tp_vc_b_, (size_t)BH * S_kv * D * hb, g_vc)) return false;
+  if (!ensure(tp_s_, tp_s_b_, (size_t)BH * S_q * S_kv * hb, g_s)) return false;
+  (void)g_qp; (void)g_s;
+
+  // image1d_buffer (half4) over Kt/Vc — rebuilt ONLY when the buffer grows, AND
+  // sized to the WHOLE buffer (not just this shape) so a smaller later shape
+  // still has a valid image. texel width = buffer_bytes / 8 (half4 = 8 bytes).
+  cl_image_format fmt = {CL_RGBA, CL_HALF_FLOAT};
+  auto rebuild_img = [&](cl_mem& img, cl::Buffer& buf, size_t buf_bytes, bool grew) {
+    if (img && grew) { clReleaseMemObject(img); img = nullptr; }
+    if (!img) {
+      cl_image_desc desc = {};
+      desc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
+      desc.image_width = buf_bytes / 8;  // half4 texels over the whole buffer
+      desc.buffer = buf();
+      cl_int e = CL_SUCCESS;
+      img = clCreateImage(ctx(), CL_MEM_READ_ONLY, &fmt, &desc, nullptr, &e);
+      if (e != CL_SUCCESS) { MLLM_ERROR("FA two-pass image create failed: {}", e); img = nullptr; }
+    }
+    return img != nullptr;
+  };
+  if (!rebuild_img(tp_kt_img_, tp_kt_, tp_kt_b_, g_kt)) return false;
+  if (!rebuild_img(tp_vc_img_, tp_vc_, tp_vc_b_, g_vc)) return false;
+  cl_mem imgKt = tp_kt_img_, imgVc = tp_vc_img_;
+
+  const auto& qs = Q.stride();
+  const auto& ks = K.stride();
+  const auto& vs = V.stride();
+  auto q_buf = (cl_mem)Q.impl()->ptr<void>();
+  auto k_buf = (cl_mem)K.impl()->ptr<void>();
+  auto v_buf = (cl_mem)V.impl()->ptr<void>();
+  auto o_buf = (cl_mem)O.impl()->ptr<void>();
+  cl_mem qp = tp_qp_(), kt = tp_kt_(), vc = tp_vc_(), s = tp_s_();
+
+  auto& cq = rt->commandQueue();
+  cl_int err = CL_SUCCESS;
+  auto SI = [&](cl::Kernel& k, int i, int v) { err |= k.setArg(i, sizeof(int), &v); };
+  auto SF = [&](cl::Kernel& k, int i, float v) { err |= k.setArg(i, sizeof(float), &v); };
+  auto SM = [&](cl::Kernel& k, int i, cl_mem v) { err |= k.setArg(i, sizeof(cl_mem), &v); };
+
+  const int Qbs = qs[0], Qhs = qs[1], Qss = qs[2];
+  const int Kbs = ks[0], Khs = ks[1], Kss = ks[2];
+  const int Vbs = vs[0], Vhs = vs[1], Vss = vs[2];
+
+  // pack_q
+  { auto& k = tp_pack_q_->get(); SM(k,0,q_buf); SM(k,1,qp); SI(k,2,B); SI(k,3,H); SI(k,4,S_q); SI(k,5,Qbs); SI(k,6,Qhs); SI(k,7,Qss);
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_q, D / 4, BH), cl::NullRange); }
+  // trans_k
+  { auto& k = tp_trans_k_->get(); SM(k,0,k_buf); SM(k,1,kt); SI(k,2,B); SI(k,3,H); SI(k,4,S_kv); SI(k,5,Kbs); SI(k,6,Khs); SI(k,7,Kss);
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_kv, D, BH), cl::NullRange); }
+  // copy_v
+  { auto& k = tp_copy_v_->get(); SM(k,0,v_buf); SM(k,1,vc); SI(k,2,B); SI(k,3,H); SI(k,4,S_kv); SI(k,5,Vbs); SI(k,6,Vhs); SI(k,7,Vss);
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_kv, D, BH), cl::NullRange); }
+  // qk_gemm
+  { auto& k = tp_qk_->get(); SM(k,0,imgKt); SM(k,1,qp); SM(k,2,s); SI(k,3,S_q); SI(k,4,S_kv); SI(k,5,BH); SF(k,6,scale); SI(k,7,causal);
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_kv / 8, S_q / 4, BH), cl::NullRange); }
+  // softmax_norm (in place on s)
+  { auto& k = tp_softmax_->get(); SM(k,0,s); SI(k,1,S_q); SI(k,2,S_kv); SI(k,3,BH);
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(kTpSmLw, S_q, BH), cl::NDRange(kTpSmLw, 1, 1)); }
+  // pv_gemm
+  { auto& k = tp_pv_->get(); SM(k,0,imgVc); SM(k,1,s); SM(k,2,o_buf); SI(k,3,S_q); SI(k,4,S_kv); SI(k,5,BH); SI(k,6,causal);
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(D / 8, S_q / 4, BH), cl::NullRange); }
+
+  // No clFinish here: the persistent member images outlive these enqueues, so
+  // the op pipelines with the caller's adjacent ops like the fused path.
+  if (err != CL_SUCCESS) { MLLM_ERROR("FA two-pass setArg failed: {}", err); return false; }
+  return true;
 }
 
 }  // namespace mllm::opencl
