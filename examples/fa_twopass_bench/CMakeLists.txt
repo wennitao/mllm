@@ -1,0 +1,6 @@
+if(MLLM_BUILD_OPENCL_BACKEND)
+  add_executable(mllm-fa-twopass-bench main.cpp)
+  target_link_libraries(mllm-fa-twopass-bench PRIVATE MllmRT MllmCPUBackend MllmOpenCLBackend)
+  target_include_directories(mllm-fa-twopass-bench PRIVATE ${MLLM_INCLUDE_DIR})
+  target_include_directories(mllm-fa-twopass-bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

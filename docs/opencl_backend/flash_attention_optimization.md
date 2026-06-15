@@ -240,15 +240,57 @@ Findings:
   a non-issue.
 
 So a texture two-pass prefill should land the matmul-bound portion at ~650–900
-GF/s; net E2E after softmax-reduce + repack overhead realistically **~500–650
-GF/s @ S=2048 (≈4–5× the fused 116)**. **Stage 2 (the full three-kernel path:
-QK-GEMM w/ scale+causal+partial-stats epilogue → softmax-reduce → P·V-GEMM w/
-exp-normalize epilogue, fp16 score scratch, op dispatch S_q ≥ 512) is the next
-chunk.** Stretch: int8-DP4A QK GEMM (the `block_sparse_attention.cl` recipe;
-~1520 GF/s class) — the fp16 backend's int8-dot probe reports "No" on this branch
-but `cl_khr_integer_dot_product` IS exposed (wrong ext-name probe; fixed on
-`blocksparse-opencl`). Full corrected spec + staged plan + kill-criteria:
-the design-workflow synthesis (run `wf_91ae0fe5-6b8`).
+GF/s. **Stage 2 built and validated this — and it beat the estimate.**
+
+### Stage 2 — two-pass GEMM prefill: BUILT, validated, ~7× the fused kernel
+
+Standalone bench `examples/fa_twopass_bench/` (`mllm-fa-twopass-bench`,
+kernels in `kernels.cl.inc`) implements the full pipeline and validates each
+shape against a CPU fp32 causal-attention reference. On device (SM8750, H=16,
+D=128, fp16 in / fp32 accumulate):
+
+| S_q=S_kv | E2E ms | **GF/s** | vs fused | max_abs vs fp32 |
+|---:|---:|---:|---:|---:|
+| 512  | 2.04  | 529 | — | 2.0e-4 |
+| 1024 | 6.05  | 711 | 6.4× | 2.1e-4 |
+| 2048 | 21.6  | **797** | **6.9×** | 2.1e-4 |
+| 4096 | 81.5  | **843** | ∞ (fused can't run) | 2.1e-4 |
+
+Pipeline (per head, head-batched via grid dim 2):
+1. `pack_q`  Q[Sq,128] → Qp[32,Sq,4]  (QK B-operand pack; ~0.5 ms)
+2. `trans_k` K[Skv,128] → Kt[128,Skv], wrapped as image1d_buffer (QK A; ~0.6 ms)
+3. `qk_gemm` A=Kt image, B=Qp → **S[q,k] query-major** fp16, epilogue = ×scale +
+   causal mask + clamp; **causal block-skip** stores −INF for fully-masked
+   8×4 tiles without the 128-deep matmul.
+4. `softmax_norm` workgroup-per-row, LDS-reduced, **in place on S** → P
+   query-major (max/sum scan only the causal lower triangle).
+5. `pv_gemm` A=V image (natural, no transpose), **B=P read directly query-major**
+   via 4×vload4 (no transpose/pack), causal reduction bound per n-tile → O.
+
+Three design decisions made it work, each measured:
+- **A query-major score scratch + direct-P P·V (no transpose).** The naive
+  transpose-and-pack of P into the GEMM's `[k/4,q,4]` B-format cost **295 ms**
+  (a strided-scatter); reading P query-major in P·V via 4×vload4 instead drops
+  that to ~0 at the cost of P·V going 710→~500 GF/s standalone — a ~40× net win.
+  This is the crux: **do NOT transpose the score matrix between passes.**
+- **Coalesced workgroup-per-row softmax** (was one-thread-per-row, 295 ms → 6 ms).
+- **Causal block-skip in both GEMMs** (S=2048 510→797 GF/s; S=4096 516→843):
+  skip the upper-triangle tile matmuls in QK, bound the P·V reduction per n-tile.
+
+Per-stage @ S=2048: qk 7.5 + pv 7.4 + softmax 4–6 + pack 0.5 + trans 0.6 ≈ 21 ms.
+The GEMMs (≈15 ms) dominate; the glue is now ~6 ms.
+
+**Remaining levers toward 1 TF:** softmax (still ~25% of E2E) could fuse its
+row-stats into the QK epilogue (the synthesis's partial-stats option); the
+pack/trans pre-passes (~1 ms) could fold into the GEMM loads. **Stretch (Stage
+3): int8-DP4A QK GEMM** (the `block_sparse_attention.cl` recipe; ~1520 GF/s
+class) — the fp16 backend's int8-dot probe reports "No" on this branch but
+`cl_khr_integer_dot_product` IS exposed (wrong ext-name probe; fixed on
+`blocksparse-opencl`). **Productionization:** wire the pipeline into
+`OpenCLFlashAttention2Op` for S_q ≥ 512 (decode keeps the Session-3 kernel,
+tiny/unaligned S keeps the fused kernel). Full spec + kill-criteria: the
+design-workflow synthesis (run `wf_91ae0fe5-6b8`); index algebra was
+adversarially pre-verified (run `wf_e922fa30-b22`, emulation max-abs 0.0).
 
 ## Earlier next steps (superseded above for decode)
 1. ~~**Dedicated decode kernel.**~~ DONE — see Session 3.
