@@ -318,6 +318,48 @@ Validated vs the fp32 fused kernel: S=512/1024 max_abs 5.6e-4, chunked
 S_q=512<S_kv=1024 max_abs 5.9e-5 (consistent with every other fp16 path; no
 NaN). Small/unaligned S correctly fall through to the fused kernel.
 
+### Stage 3 — toward 1 TF: softmax wins land it; int8-DP4A is a dead end
+
+**int8-DP4A QK GEMM: measured NO-GO.** The synthesis floated int8-DP4A QK
+(~1520 GF/s "class") as the stretch lever. Derisked on a proper GEMM tile
+(`mllm-fa-i8qk-derisk`, d-contiguous packed-uint K/Q, `dot_acc_sat_4x8packed`):
+
+| shape | int8-DP4A | fp16-image | i8/f16 | int8 accuracy |
+|---:|---:|---:|---:|---:|
+| 2048 | 199 GF/s | 1004 GF/s | **0.20×** | mrel 0.26 |
+| 4096 | 171 GF/s | 1180 GF/s | **0.15×** | mrel 0.60 |
+
+int8-DP4A is **2–7× slower** than fp16-image and fails the accuracy gate. It
+loses the texture-cached A operand and the per-lane 32×int32 accumulator tile
+crushes occupancy — DP4A's theoretical 4× ALU never materializes (matches the
+"still ~200 GF/s on the old skeleton" warning). **fp16-image is confirmed
+optimal; int8 is dropped.** Side finding: the fp16 QK GEMM *alone* hits
+1004–1180 GF/s, so the matmuls are already >1 TF — the E2E gap is the
+non-matmul glue (softmax / pre-passes), which reframes the remaining lever.
+
+**Softmax wins — essentially 1 TF.** Two cheap, correctness-preserving changes:
+- **Online (m, l) in one causal scan** (running-max rescale) → 2 S-touches
+  instead of 3 (fused the max-pass and sum-pass).
+- **Bounded write**: the normalize pass only writes up to P·V's per-n-tile read
+  bound (≈ q's tile max q_pos), not the full row — masked keys in (q_pos, wcap)
+  become 0, keys ≥ wcap are never read by P·V. The write is now
+  lower-triangle-bounded too, ≈ halving it at square shapes.
+
+Standalone (`mllm-fa-twopass-bench`) and through the op:
+
+| S | Stage-2 | + online sm | + bounded write | op (w/ copy_v) |
+|---:|---:|---:|---:|---:|
+| 1024 | 711 | 738 | 769 | **719** |
+| 2048 | 797 | 851 | **925** | **887** |
+| 4096 | 843 | 891 | **985** | — |
+
+**985 GF/s @ S=4096 standalone (98.5% of 1 TF); 887 through the op @ S=2048
+(7.6× the fused 116).** Correctness unchanged (max_abs 2.1e-4 standalone vs CPU
+fp32; 5.6e-4 through the op vs fp32-fused). The residual gap to 1 TF is the
+pre-passes (pack/trans/copy ~1.5 ms) and P·V's direct-P 4×vload4 (slower than a
+packed B but avoids the 295 ms transpose); folding pack/trans into the GEMM
+loads or imaging P are the next (smaller) levers.
+
 ## Earlier next steps (superseded above for decode)
 1. ~~**Dedicated decode kernel.**~~ DONE — see Session 3.
 2. **Prefill is at its ceiling** for this design (~116 GF/s). Going further needs

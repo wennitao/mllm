@@ -3,4 +3,8 @@ if(MLLM_BUILD_OPENCL_BACKEND)
   target_link_libraries(mllm-fa-twopass-bench PRIVATE MllmRT MllmCPUBackend MllmOpenCLBackend)
   target_include_directories(mllm-fa-twopass-bench PRIVATE ${MLLM_INCLUDE_DIR})
   target_include_directories(mllm-fa-twopass-bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+  add_executable(mllm-fa-i8qk-derisk i8qk_derisk.cpp)
+  target_link_libraries(mllm-fa-i8qk-derisk PRIVATE MllmRT MllmCPUBackend MllmOpenCLBackend)
+  target_include_directories(mllm-fa-i8qk-derisk PRIVATE ${MLLM_INCLUDE_DIR})
 endif()

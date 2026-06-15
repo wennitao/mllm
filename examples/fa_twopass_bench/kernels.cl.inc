@@ -143,30 +143,42 @@ __kernel void softmax_norm(__global half* S, const int Sq, const int Skv, const 
   if (q >= Sq) return;
   __global half* Sh = S + (long)h * Sq * Skv + (long)q * Skv;
 
-  __local float red[SM_LW];
+  __local float redm[SM_LW];
+  __local float redl[SM_LW];
 
-  // Causal upper bound: keys k > q_pos are masked (-inf), so passes 1-2 only
-  // scan k <= q_pos (the lower triangle). Pass 3 still writes the FULL row
-  // (zeros above q_pos) because pv_gemm reads P up to its tile's max q_pos.
+  // Causal upper bound: keys k > q_pos are masked (-inf), so the stats pass only
+  // scans k <= q_pos. Pass 2 still writes the FULL row (zeros above q_pos)
+  // because pv_gemm reads P up to its tile's max q_pos.
   const int kcap = causalRow(Sq, Skv, q);
 
-  // pass 1: row max over the causal keys.
-  float m = -INFINITY;
-  for (int k = t; k <= kcap; k += SM_LW) { float s = (float)Sh[k]; if (!isinf(s)) m = fmax(m, s); }
-  red[t] = m; barrier(CLK_LOCAL_MEM_FENCE);
-  for (int o = SM_LW >> 1; o > 0; o >>= 1) { if (t < o) red[t] = fmax(red[t], red[t + o]); barrier(CLK_LOCAL_MEM_FENCE); }
-  m = red[0]; barrier(CLK_LOCAL_MEM_FENCE);
-
-  // pass 2: sum of exp(s - m) over the causal keys.
-  float l = 0.0f;
-  if (!isinf(m)) for (int k = t; k <= kcap; k += SM_LW) { float s = (float)Sh[k]; l += isinf(s) ? 0.0f : native_exp(s - m); }
-  red[t] = l; barrier(CLK_LOCAL_MEM_FENCE);
-  for (int o = SM_LW >> 1; o > 0; o >>= 1) { if (t < o) red[t] = red[t] + red[t + o]; barrier(CLK_LOCAL_MEM_FENCE); }
-  l = red[0];
+  // pass 1: ONLINE (m, l) in a single scan (running-max rescale) -> 2 total
+  // S-reads instead of 3 (max-pass + sum-pass fused).
+  float m = -INFINITY, l = 0.0f;
+  for (int k = t; k <= kcap; k += SM_LW) {
+    float s = (float)Sh[k];
+    if (!isinf(s)) { float mn = fmax(m, s); l = l * native_exp(m - mn) + native_exp(s - mn); m = mn; }
+  }
+  redm[t] = m; redl[t] = l; barrier(CLK_LOCAL_MEM_FENCE);
+  // cross-lane online merge: m_all = max m; l_all = sum l*exp(m - m_all).
+  for (int o = SM_LW >> 1; o > 0; o >>= 1) {
+    if (t < o) {
+      float ma = redm[t], mb = redm[t + o], la = redl[t], lb = redl[t + o];
+      float mn = fmax(ma, mb);
+      redl[t] = (isinf(mn) ? 0.0f : la * native_exp(ma - mn) + lb * native_exp(mb - mn));
+      redm[t] = mn;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  m = redm[0]; l = redl[0];
   const float inv = (l > 0.0f) ? (1.0f / l) : 0.0f;
 
-  // pass 3: write P = exp(s - m) * inv back into S[q,k] (in place, coalesced).
-  for (int k = t; k < Skv; k += SM_LW) {
+  // pass 2: write P = exp(s - m) * inv in place. Only up to pv_gemm's per-n-tile
+  // read bound (wcap = q's tile max q_pos rounded up to 4): masked keys in
+  // (q_pos, wcap) become 0 via isinf(s); keys >= wcap are never read by pv, so
+  // they need no write -> the write is lower-triangle-bounded too.
+  const int gx4 = q & ~3;
+  const int wcap = min(Skv, (((Skv - Sq) + gx4 + 3) + 4) & ~3);
+  for (int k = t; k < wcap; k += SM_LW) {
     float s = (float)Sh[k];
     float p = (isinf(m) || isinf(s)) ? 0.0f : native_exp(s - m) * inv;
     Sh[k] = (half)p;

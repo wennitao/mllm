@@ -659,23 +659,35 @@ __kernel void tp_softmax_norm(__global half* S, const int Sq, const int Skv, con
   const int bh = get_global_id(2);
   if (q >= Sq || bh >= BH) return;
   __global half* Sh = S + (long)bh * Sq * Skv + (long)q * Skv;
-  __local float red[TP_SM_LW];
+  __local float redm[TP_SM_LW];
+  __local float redl[TP_SM_LW];
   const int kcap = tp_causal_row(Sq, Skv, q);
 
-  float m = -INFINITY;
-  for (int k = t; k <= kcap; k += TP_SM_LW) { float s = (float)Sh[k]; if (!isinf(s)) m = fmax(m, s); }
-  red[t] = m; barrier(CLK_LOCAL_MEM_FENCE);
-  for (int o = TP_SM_LW >> 1; o > 0; o >>= 1) { if (t < o) red[t] = fmax(red[t], red[t + o]); barrier(CLK_LOCAL_MEM_FENCE); }
-  m = red[0]; barrier(CLK_LOCAL_MEM_FENCE);
-
-  float l = 0.0f;
-  if (!isinf(m)) for (int k = t; k <= kcap; k += TP_SM_LW) { float s = (float)Sh[k]; l += isinf(s) ? 0.0f : native_exp(s - m); }
-  red[t] = l; barrier(CLK_LOCAL_MEM_FENCE);
-  for (int o = TP_SM_LW >> 1; o > 0; o >>= 1) { if (t < o) red[t] = red[t] + red[t + o]; barrier(CLK_LOCAL_MEM_FENCE); }
-  l = red[0];
+  // pass 1: ONLINE (m, l) in one causal scan (running-max rescale) -> 2 total
+  // S-touches instead of 3 (max-pass + sum-pass fused).
+  float m = -INFINITY, l = 0.0f;
+  for (int k = t; k <= kcap; k += TP_SM_LW) {
+    float s = (float)Sh[k];
+    if (!isinf(s)) { float mn = fmax(m, s); l = l * native_exp(m - mn) + native_exp(s - mn); m = mn; }
+  }
+  redm[t] = m; redl[t] = l; barrier(CLK_LOCAL_MEM_FENCE);
+  for (int o = TP_SM_LW >> 1; o > 0; o >>= 1) {
+    if (t < o) {
+      float ma = redm[t], mb = redm[t + o], la = redl[t], lb = redl[t + o];
+      float mn = fmax(ma, mb);
+      redl[t] = (isinf(mn) ? 0.0f : la * native_exp(ma - mn) + lb * native_exp(mb - mn));
+      redm[t] = mn;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  m = redm[0]; l = redl[0];
   const float inv = (l > 0.0f) ? (1.0f / l) : 0.0f;
 
-  for (int k = t; k < Skv; k += TP_SM_LW) {
+  // pass 2: write P in place, only up to pv_gemm's per-n-tile read bound (wcap);
+  // masked keys in (q_pos, wcap) -> 0; keys >= wcap are never read by pv.
+  const int gx4 = q & ~3;
+  const int wcap = min(Skv, (((Skv - Sq) + gx4 + 3) + 4) & ~3);
+  for (int k = t; k < wcap; k += TP_SM_LW) {
     float s = (float)Sh[k];
     Sh[k] = (half)((isinf(m) || isinf(s)) ? 0.0f : native_exp(s - m) * inv);
   }
