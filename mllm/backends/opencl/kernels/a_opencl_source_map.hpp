@@ -35,7 +35,7 @@ const std::map<std::string, const char*> OpenCLProgramMap = {
 };
 }  // namespace mllm::opencl
 const std::map<std::string, std::string> OpenCLProgramMd5Map = {
-    {"flash_attention", "7180e27fc9f99174376fcc8cfb7eb7f6"},
+    {"flash_attention", "3727637dc183e8320876ee02aea30ee9"},
     {"silu", "c9c2197b4b426d12cc652296738c24e1"},
     {"add", "a1ed4a6207f790f5dc436cf841744cf3"},
     {"mul", "1241c7141443ad9e18dadd14e150516a"},

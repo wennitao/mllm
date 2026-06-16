@@ -24,6 +24,9 @@
 #include "mllm/backends/opencl/OpenCLBackend.hpp"
 #include "mllm/backends/opencl/runtime/OpenCLLoader.hpp"
 #include "mllm/backends/opencl/runtime/OpenCLRuntime.hpp"
+#include "mllm/backends/opencl/ops/BlockSparseAttentionOp.hpp"
+#include "mllm/core/Tensor.hpp"
+#include "mllm/core/aops/BlockSparseAttentionOp.hpp"
 
 using mllm::Argparse;
 using mllm::opencl::OpenCLLoader;
@@ -168,6 +171,23 @@ MLLM_MAIN({
     std::vector<float> ref; cpu_ref(0,Sq,Skv,D,num_qb,top_k,BK,BQ,Q.data(),Kk.data(),V.data(),idx.data(),scale,ref);
     double mx=0,sm=0; int bad=0;
     for(long i=0;i<(long)Sq*D;++i){ float g=(float)Oh[i]; if(std::isnan(g)||std::isinf(g)){++bad;continue;} double d=std::fabs((double)g-(double)ref[i]); mx=std::max(mx,d); sm+=d; }
+
+    // Op-level validation: build Tensors from the SAME data and drive
+    // OpenCLBlockSparseAttentionOp; compare head 0 to the CPU reference.
+    if (const char* oe=std::getenv("BSA_OP_TEST"); oe && oe[0]=='1') {
+      using mllm::Tensor; using mllm::kFloat16; using mllm::kInt32; using mllm::kCPU; using mllm::kOpenCL;
+      auto mkT=[&](const std::vector<__fp16>& src, int S){ return Tensor::fromVector<__fp16>(src,{1,H,S,D},kFloat16,kCPU).to(kOpenCL); };
+      Tensor tQ=mkT(Q,Sq), tK=mkT(Kk,Skv), tV=mkT(V,Skv);
+      Tensor tId=Tensor::fromVector<int>(idx,{H,num_qb,top_k},kInt32,kCPU).to(kOpenCL);
+      mllm::aops::BlockSparseAttentionOpOptions o{}; o.B=1; o.q_head=H; o.kv_head=H; o.D=D; o.BK=BK; o.causal_mask=true;
+      mllm::opencl::OpenCLBlockSparseAttentionOp op(o);
+      std::vector<Tensor> in{tQ,tK,tV,tId}, out; op.reshape(in,out); op.setup(in,out); op.forward(in,out);
+      CL_CHECK(OpenCLLoader::instance().clFinish(q));
+      Tensor oc=out[0].to(kCPU); const __fp16* op_o=oc.ptr<__fp16>();
+      double omx=0; int obad=0;
+      for(long i=0;i<(long)Sq*D;++i){ float g=(float)op_o[i]; if(std::isnan(g)||std::isinf(g)){++obad;continue;} omx=std::max(omx,std::fabs((double)g-(double)ref[i])); }
+      fmt::print("   [op] Sq={:5d} max_abs={:.3e} nan={}\n",Sq,omx,obad);
+    }
 
     auto t0=std::chrono::high_resolution_clock::now(); for(int i=0;i<reps;++i) run(); CL_CHECK(OpenCLLoader::instance().clFinish(q)); auto t1=std::chrono::high_resolution_clock::now();
     double ms=std::chrono::duration<double,std::milli>(t1-t0).count()/reps;

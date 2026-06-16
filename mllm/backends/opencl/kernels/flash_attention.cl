@@ -571,16 +571,18 @@ __kernel void tp_trans_k(__global const half* K, __global half* Kt,
 
 // copy_v: strided V[b,h,k,:] -> contiguous Vc[bh][Skv, FA_D] (PV A-image, natural).
 // global=(Skv, FA_D, B*H).
+// Vectorized half8 over the contiguous d (D-stride 1), coalesced.
+// global=(FA_D/8, Skv, B*H).
 __kernel void tp_copy_v(__global const half* V, __global half* Vc,
                         const int B, const int H, const int Skv,
                         const int Vbs, const int Vhs, const int Vss) {
-  const int k = get_global_id(0);
-  const int d = get_global_id(1);
+  const int dg = get_global_id(0);   // d-group of 8
+  const int k = get_global_id(1);
   const int bh = get_global_id(2);
-  if (k >= Skv || d >= FA_D || bh >= B * H) return;
+  if (dg >= FA_D / 8 || k >= Skv || bh >= B * H) return;
   const int b = bh / H, h = bh - b * H;
-  Vc[(long)bh * Skv * FA_D + (long)k * FA_D + d] =
-      V[(long)b * Vbs + (long)h * Vhs + (long)k * Vss + d];
+  half8 v = vload8(0, V + (long)b * Vbs + (long)h * Vhs + (long)k * Vss + dg * 8);
+  vstore8(v, 0, Vc + (long)bh * Skv * FA_D + (long)k * FA_D + dg * 8);
 }
 
 // tp_qk_gemm: S[q,k] = scale * (Q[q,:].K[k,:]) + causal mask + clamp, query-major.
@@ -738,4 +740,170 @@ __kernel void tp_pv_gemm(__read_only image1d_buffer_t V_img,
   #define TPEMITO(NN, CV) { const int q = gx_4 + (NN); if (q < N) vstore8(convert_half8(CV), 0, Oh + (long)q * FA_D + gy_8); }
   TPEMITO(0, c0); TPEMITO(1, c1); TPEMITO(2, c2); TPEMITO(3, c3);
   #undef TPEMITO
+}
+
+// ============================================================================
+// Block-sparse two-pass GEMM prefill. Reuses the dense pre-passes (tp_pack_q /
+// tp_trans_k / tp_copy_v -> contiguous Qp/Kt/Vc images); the QK/PV GEMMs read
+// those images at the SELECTED block offsets from block_idx (index-driven, no
+// gather). Selection: block_idx[(bh*num_qb + qb)*top_k + slot] = key-block id
+// (units of BK keys) or < 0 padding. sel = top_k*BK. S scratch [B*H, num_qb*BQ,
+// sel] query-major (BQ = Sq/num_qb). Correctness mirrors the dense path; the
+// per-element causal/padding test handles the diagonal block's triangle.
+// See docs/opencl_backend/block_sparse_two_pass.md.
+// ============================================================================
+
+#ifndef BSA_SM_LW
+#define BSA_SM_LW 64
+#endif
+
+// bs_qk_gemm: S[q_local, slot] = scale*Q[q].K[selected] + causal/padding mask.
+// A=Kt image @ selected offsets; B=Qp packed. global=(sel/8, BQ/4, B*H*num_qb).
+__kernel void bs_qk_gemm(__read_only image1d_buffer_t Kt_img,
+                         __global const half* Qp, __global half* S,
+                         __global const int* block_idx,
+                         const int Sq, const int Skv, const int BH,
+                         const int num_qb, const int top_k, const int BK, const int BQ,
+                         const float scale, const int causal) {
+  const int gy = get_global_id(0);
+  const int gx = get_global_id(1);
+  const int bhqb = get_global_id(2);
+  const int sel = top_k * BK;
+  if (gy * 8 >= sel || gx * 4 >= BQ || bhqb >= BH * num_qb) return;
+  const int bh = bhqb / num_qb, qb = bhqb - bh * num_qb;
+  const int gy_8 = gy << 3, gx_4 = gx << 2, M_4kv = Skv >> 2;
+
+  const int blk = gy_8 / BK;
+  const int key0 = gy_8 - blk * BK;
+  const int blk_id = block_idx[bhqb * top_k + blk];
+  const int kg0 = (blk_id < 0) ? 0 : (blk_id * BK + key0);
+  const int kt_base = bh * FA_D * M_4kv + (kg0 >> 2);
+
+  __global const half* Qph = Qp + (long)bh * (FA_D / 4) * Sq * 4;
+  __global half* Sh = S + (long)bhqb * BQ * sel;
+
+  float8 c0 = (float8)0, c1 = (float8)0, c2 = (float8)0, c3 = (float8)0;
+  half8 B0, B1, B2, B3;
+  for (int i = 0; i < FA_D; i += 4) {
+    const int t = kt_base + i * M_4kv;
+    B0.s0123 = read_imageh(Kt_img, t);       B0.s4567 = read_imageh(Kt_img, t + 1);
+    const int t1 = kt_base + (i + 1) * M_4kv;
+    B1.s0123 = read_imageh(Kt_img, t1);      B1.s4567 = read_imageh(Kt_img, t1 + 1);
+    const int t2 = kt_base + (i + 2) * M_4kv;
+    B2.s0123 = read_imageh(Kt_img, t2);      B2.s4567 = read_imageh(Kt_img, t2 + 1);
+    const int t3 = kt_base + (i + 3) * M_4kv;
+    B3.s0123 = read_imageh(Kt_img, t3);      B3.s4567 = read_imageh(Kt_img, t3 + 1);
+    half16 w = vload16(0, Qph + ((long)(i >> 2) * Sq + qb * BQ + gx_4) * 4);
+    const float8 b0 = convert_float8(B0), b1 = convert_float8(B1), b2 = convert_float8(B2), b3 = convert_float8(B3);
+    c0 += b0*w.s0; c0 += b1*w.s1; c0 += b2*w.s2; c0 += b3*w.s3;
+    c1 += b0*w.s4; c1 += b1*w.s5; c1 += b2*w.s6; c1 += b3*w.s7;
+    c2 += b0*w.s8; c2 += b1*w.s9; c2 += b2*w.sa; c2 += b3*w.sb;
+    c3 += b0*w.sc; c3 += b1*w.sd; c3 += b2*w.se; c3 += b3*w.sf;
+  }
+  #define BSEMIT(NN, CV) {                                                      \
+    const int ql = gx_4 + (NN);                                              \
+    if (ql < BQ) {                                                           \
+      const int q_pos = (Skv - Sq) + qb * BQ + ql;                          \
+      float8 v = (CV) * scale; half8 hv;                                    \
+      hv.s0 = (half)((blk_id<0 || (causal && (kg0+0) > q_pos)) ? -INFINITY : clamp(v.s0,-TP_CLAMP,TP_CLAMP)); \
+      hv.s1 = (half)((blk_id<0 || (causal && (kg0+1) > q_pos)) ? -INFINITY : clamp(v.s1,-TP_CLAMP,TP_CLAMP)); \
+      hv.s2 = (half)((blk_id<0 || (causal && (kg0+2) > q_pos)) ? -INFINITY : clamp(v.s2,-TP_CLAMP,TP_CLAMP)); \
+      hv.s3 = (half)((blk_id<0 || (causal && (kg0+3) > q_pos)) ? -INFINITY : clamp(v.s3,-TP_CLAMP,TP_CLAMP)); \
+      hv.s4 = (half)((blk_id<0 || (causal && (kg0+4) > q_pos)) ? -INFINITY : clamp(v.s4,-TP_CLAMP,TP_CLAMP)); \
+      hv.s5 = (half)((blk_id<0 || (causal && (kg0+5) > q_pos)) ? -INFINITY : clamp(v.s5,-TP_CLAMP,TP_CLAMP)); \
+      hv.s6 = (half)((blk_id<0 || (causal && (kg0+6) > q_pos)) ? -INFINITY : clamp(v.s6,-TP_CLAMP,TP_CLAMP)); \
+      hv.s7 = (half)((blk_id<0 || (causal && (kg0+7) > q_pos)) ? -INFINITY : clamp(v.s7,-TP_CLAMP,TP_CLAMP)); \
+      vstore8(hv, 0, Sh + (long)ql * sel + gy_8);                           \
+    } }
+  BSEMIT(0, c0); BSEMIT(1, c1); BSEMIT(2, c2); BSEMIT(3, c3);
+  #undef BSEMIT
+}
+
+// bs_softmax: per (bhqb, q_local) over sel slots, online (m,l) + write in place.
+// global=(BSA_SM_LW, BQ, B*H*num_qb), local=(BSA_SM_LW,1,1).
+__kernel void bs_softmax(__global half* S, const int BH, const int num_qb,
+                         const int top_k, const int BK, const int BQ) {
+  const int t = get_local_id(0);
+  const int ql = get_global_id(1);
+  const int bhqb = get_global_id(2);
+  const int sel = top_k * BK;
+  if (ql >= BQ || bhqb >= BH * num_qb) return;
+  __global half* Sh = S + (long)bhqb * BQ * sel + (long)ql * sel;
+  __local float redm[BSA_SM_LW];
+  __local float redl[BSA_SM_LW];
+
+  float m = -INFINITY, l = 0.0f;
+  for (int k = t; k < sel; k += BSA_SM_LW) {
+    float s = (float)Sh[k];
+    if (!isinf(s)) { float mn = fmax(m, s); l = l * native_exp(m - mn) + native_exp(s - mn); m = mn; }
+  }
+  redm[t] = m; redl[t] = l; barrier(CLK_LOCAL_MEM_FENCE);
+  for (int o = BSA_SM_LW >> 1; o > 0; o >>= 1) {
+    if (t < o) {
+      float ma = redm[t], mb = redm[t + o], la = redl[t], lb = redl[t + o];
+      float mn = fmax(ma, mb);
+      redl[t] = (isinf(mn) ? 0.0f : la * native_exp(ma - mn) + lb * native_exp(mb - mn));
+      redm[t] = mn;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  m = redm[0]; l = redl[0];
+  const float inv = (l > 0.0f) ? (1.0f / l) : 0.0f;
+  for (int k = t; k < sel; k += BSA_SM_LW) {
+    float s = (float)Sh[k];
+    Sh[k] = (half)((isinf(m) || isinf(s)) ? 0.0f : native_exp(s - m) * inv);
+  }
+}
+
+// bs_pv_gemm: O[q,d] = sum_slot P[q,slot] V[selected]. A=Vc image @ selected
+// offsets; B=P slot-major direct. Outer loop over selected blocks (block_idx
+// once/block, padding skipped). global=(FA_D/8, BQ/4, B*H*num_qb). O[bh,Sq,D].
+__kernel void bs_pv_gemm(__read_only image1d_buffer_t V_img,
+                         __global const half* P, __global half* O,
+                         __global const int* block_idx,
+                         const int Sq, const int Skv, const int BH,
+                         const int num_qb, const int top_k, const int BK, const int BQ) {
+  const int gy = get_global_id(0);
+  const int gx = get_global_id(1);
+  const int bhqb = get_global_id(2);
+  const int sel = top_k * BK;
+  if (gy * 8 >= FA_D || gx * 4 >= BQ || bhqb >= BH * num_qb) return;
+  const int bh = bhqb / num_qb, qb = bhqb - bh * num_qb;
+  const int gy_8 = gy << 3, gx_4 = gx << 2, M_4 = FA_D >> 2;
+
+  const int v_head = bh * Skv * (FA_D >> 2);
+  __global const half* Ph = P + (long)bhqb * BQ * sel;
+  __global half* Oh = O + (long)bh * (long)Sq * FA_D;
+  __global const half* p0r = Ph + (long)(gx_4 + 0) * sel;
+  __global const half* p1r = Ph + (long)(gx_4 + 1) * sel;
+  __global const half* p2r = Ph + (long)(gx_4 + 2) * sel;
+  __global const half* p3r = Ph + (long)(gx_4 + 3) * sel;
+
+  float8 c0 = (float8)0, c1 = (float8)0, c2 = (float8)0, c3 = (float8)0;
+  half8 B0, B1, B2, B3;
+  for (int blk = 0; blk < top_k; ++blk) {
+    const int blk_id = block_idx[bhqb * top_k + blk];
+    if (blk_id < 0) continue;
+    const int kbase = blk_id * BK, sbase = blk * BK;
+    for (int sub = 0; sub < BK; sub += 4) {
+      const int s = sbase + sub, kg = kbase + sub;
+      const int vt = v_head + kg * M_4 + gy * 2;
+      B0.s0123 = read_imageh(V_img, vt);          B0.s4567 = read_imageh(V_img, vt + 1);
+      const int vt1 = v_head + (kg + 1) * M_4 + gy * 2;
+      B1.s0123 = read_imageh(V_img, vt1);         B1.s4567 = read_imageh(V_img, vt1 + 1);
+      const int vt2 = v_head + (kg + 2) * M_4 + gy * 2;
+      B2.s0123 = read_imageh(V_img, vt2);         B2.s4567 = read_imageh(V_img, vt2 + 1);
+      const int vt3 = v_head + (kg + 3) * M_4 + gy * 2;
+      B3.s0123 = read_imageh(V_img, vt3);         B3.s4567 = read_imageh(V_img, vt3 + 1);
+      half4 p0 = vload4(0, p0r + s), p1 = vload4(0, p1r + s), p2 = vload4(0, p2r + s), p3 = vload4(0, p3r + s);
+      const float8 b0 = convert_float8(B0), b1 = convert_float8(B1), b2 = convert_float8(B2), b3 = convert_float8(B3);
+      c0 += b0*p0.s0; c0 += b1*p0.s1; c0 += b2*p0.s2; c0 += b3*p0.s3;
+      c1 += b0*p1.s0; c1 += b1*p1.s1; c1 += b2*p1.s2; c1 += b3*p1.s3;
+      c2 += b0*p2.s0; c2 += b1*p2.s1; c2 += b2*p2.s2; c2 += b3*p2.s3;
+      c3 += b0*p3.s0; c3 += b1*p3.s1; c3 += b2*p3.s2; c3 += b3*p3.s3;
+    }
+  }
+  #define BSEMITO(NN, CV) { const int ql = gx_4 + (NN); if (ql < BQ) { const int qg = qb * BQ + ql; vstore8(convert_half8(CV), 0, Oh + (long)qg * FA_D + gy_8); } }
+  BSEMITO(0, c0); BSEMITO(1, c1); BSEMITO(2, c2); BSEMITO(3, c3);
+  #undef BSEMITO
 }

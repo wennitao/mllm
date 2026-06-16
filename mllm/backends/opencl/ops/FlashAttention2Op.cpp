@@ -357,9 +357,9 @@ bool OpenCLFlashAttention2Op::tryForwardTwoPass(const Tensor& Q, const Tensor& K
   // trans_k
   { auto& k = tp_trans_k_->get(); SM(k,0,k_buf); SM(k,1,kt); SI(k,2,B); SI(k,3,H); SI(k,4,S_kv); SI(k,5,Kbs); SI(k,6,Khs); SI(k,7,Kss);
     cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_kv, D, BH), cl::NullRange); }
-  // copy_v
+  // copy_v (vectorized half8: global = (D/8, S_kv, B*H))
   { auto& k = tp_copy_v_->get(); SM(k,0,v_buf); SM(k,1,vc); SI(k,2,B); SI(k,3,H); SI(k,4,S_kv); SI(k,5,Vbs); SI(k,6,Vhs); SI(k,7,Vss);
-    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_kv, D, BH), cl::NullRange); }
+    cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(D / 8, S_kv, BH), cl::NullRange); }
   // qk_gemm
   { auto& k = tp_qk_->get(); SM(k,0,imgKt); SM(k,1,qp); SM(k,2,s); SI(k,3,S_q); SI(k,4,S_kv); SI(k,5,BH); SF(k,6,scale); SI(k,7,causal);
     cq.enqueueNDRangeKernel(k, cl::NullRange, cl::NDRange(S_kv / 8, S_q / 4, BH), cl::NullRange); }
