@@ -194,7 +194,7 @@ class CMakeBuildTask(Task):
         if targets:
             for target in targets:
                 sub_command = self.make_command_str(
-                    self.CMAKE_COMMAND.extend(["--target", target])
+                    self.CMAKE_COMMAND + ["--target", target]
                 )
                 logging.info(sub_command)
                 throw_error_if_failed(os.system(sub_command))

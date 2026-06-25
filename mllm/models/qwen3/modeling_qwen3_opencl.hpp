@@ -120,23 +120,13 @@ class Qwen3AttentionOpenCL final : public nn::Module {
     value_states = value_states_new;
 
     // FlashAttention (BHSD inputs). Returns [B, H, S_q, D].
-    Tensor attn;
-    if (key_states.dtype() == kFloat32) {
-      // attention weight
-      // [B, H, S, S]
-      attn = qk_matmul_(query_states, key_states) * (1.f / sqrtf(head_dim_));
-      attn = mask_(attn);
-      attn = softmax_(attn);
-    } else if (key_states.dtype() == kFloat16) {
-      attn = qk_matmul_(query_states.to(kFloat32), key_states.to(kFloat32)) * (1.f / sqrtf(head_dim_));
-      attn = mask_(attn);
-      attn = softmax_(attn);
-      attn = attn.to(kFloat16);
-    }
-
-    // attn output
-    // [B, H, S, S] @ [B, H, S, D] -> [B, H, S, D]
-    auto output = av_matmul_(attn, value_states);
+    // Route through the OpenCL FlashAttention2 op (flash_attention.cl). Inputs
+    // are fp32 (fp32 KV cache + q4_0 GEMM output), so the op uses the fp32
+    // reference kernel, which is numerically correct on this Intel iGPU. The
+    // optimized fp16 kernels (flash_attention_fp16) are Adreno-tuned and produce
+    // incorrect results on Intel, so we keep fp32 here. The op derives B/H/S/D
+    // from the BHSD shapes and applies the causal mask internally.
+    auto output = nn::functional::flashAttention2(query_states, key_states, value_states);
 
     // [B, H, S_q, D] -> [B, S_q, H, D] -> [B, S_q, H * D]
     output = output.transpose(1, 2).view({B, S, num_attention_heads_ * head_dim_});

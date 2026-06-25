@@ -23,6 +23,15 @@
 #include <CL/cl.h>
 #include <fmt/core.h>
 
+// Host-side fp16 scalar. ARM has the builtin fp16_t; on x86 (and any target
+// without it) fall back to the bundled IEEE-754 binary16 (same 2-byte layout).
+#if defined(__ARM_FP16_FORMAT_IEEE) || defined(__aarch64__)
+using fp16_t = __fp16;
+#else
+#include "half/half.hpp"
+using fp16_t = half_float::half;
+#endif
+
 #include <mllm/mllm.hpp>
 #include "mllm/backends/opencl/OpenCLBackend.hpp"
 #include "mllm/backends/opencl/runtime/OpenCLLoader.hpp"
@@ -61,7 +70,7 @@ cl_mem img_over(cl_context ctx, cl_mem buf, size_t texels) {
 }
 
 // CPU fp32 causal attention reference for one head, returns O[Sq*128].
-void cpu_ref(int Sq, int Skv, int D, const __fp16* Q, const __fp16* K, const __fp16* V,
+void cpu_ref(int Sq, int Skv, int D, const fp16_t* Q, const fp16_t* K, const fp16_t* V,
              float scale, std::vector<float>& O) {
   O.assign((size_t)Sq * D, 0.0f);
   std::vector<float> s(Skv);
@@ -134,10 +143,10 @@ MLLM_MAIN({
     const int Sq = sh.Sq, Skv = sh.Skv;
     if (Sq % 8 || Skv % 8) { fmt::print("skip {}x{} (need mult 8)\n", Sq, Skv); continue; }
 
-    std::vector<__fp16> Q((size_t)H * Sq * D), Kk((size_t)H * Skv * D), V((size_t)H * Skv * D);
-    for (auto& x : Q) x = (__fp16)(dist(rng) * 0.5f);
-    for (auto& x : Kk) x = (__fp16)(dist(rng) * 0.5f);
-    for (auto& x : V) x = (__fp16)(dist(rng) * 0.5f);
+    std::vector<fp16_t> Q((size_t)H * Sq * D), Kk((size_t)H * Skv * D), V((size_t)H * Skv * D);
+    for (auto& x : Q) x = (fp16_t)(dist(rng) * 0.5f);
+    for (auto& x : Kk) x = (fp16_t)(dist(rng) * 0.5f);
+    for (auto& x : V) x = (fp16_t)(dist(rng) * 0.5f);
 
     cl_mem dQ = upload(ctx, q, Q.data(), Q.size() * 2, CL_MEM_READ_ONLY);
     cl_mem dK = upload(ctx, q, Kk.data(), Kk.size() * 2, CL_MEM_READ_ONLY);
@@ -185,7 +194,7 @@ MLLM_MAIN({
     // Validate head 0 FIRST (the profiling block below re-runs kernels in
     // isolation, and softmax_norm mutates dS in place, so it must not precede
     // this read).
-    std::vector<__fp16> Oh((size_t)H * Sq * D);
+    std::vector<fp16_t> Oh((size_t)H * Sq * D);
     CL_CHECK(OpenCLLoader::instance().clEnqueueReadBuffer(q, dO, CL_TRUE, 0, Oh.size()*2, Oh.data(), 0, nullptr, nullptr));
     std::vector<float> refv;
     cpu_ref(Sq, Skv, D, Q.data(), Kk.data(), V.data(), scale, refv);

@@ -1,0 +1,30 @@
+Tasks:
+  - CMakeConfigTask:
+      cmake_cfg_path: "build-x86-opencl"
+      cmake_build_type: "Release"
+      cmake_extra_args:
+        - "-DMLLM_BUILD_OPENCL_BACKEND=ON"
+        - "-DMLLM_PERFETTO_ENABLE=ON"
+        # Optional, If use Highway
+        - "-DHWY_ENABLE_TESTS=OFF"
+        - "-DHWY_ENABLE_EXAMPLES=OFF"
+        - "-DHWY_ENABLE_CONTRIB=OFF"
+        # Optional
+        - '-DMLLM_CPU_BACKEND_COMPILE_OPTIONS="-march=native"'
+        - "-DMLLM_KERNEL_USE_THREADS=ON"
+        - "-DMLLM_KERNEL_THREADS_VENDOR_OPENMP=ON"
+        - "-DMLLM_KERNEL_USE_THREADS_VENDOR_MLLM=OFF"
+        # Trim non-essential targets for the FA OpenCL bench
+        - "-DMLLM_ENABLE_TEST=OFF"
+        - "-DMLLM_ENABLE_BENCHMARK=OFF"
+        - "-DMLLM_BUILD_EXT_OP_SET=OFF"
+        - "-DMLLM_BUILD_EXT_OP_SET_TEST=OFF"
+        - "-DMLLM_BUILD_SDK_C_BINDING=OFF"
+
+  - CMakeBuildTask:
+      cmake_cfg_path: "build-x86-opencl"
+      targets:
+        - "mllm-fa-opencl-bench"
+        - "mllm-fa-twopass-bench"
+        - "mllm-qwen3-opencl-runner"
+        - "mllm-qwen3-runner"
