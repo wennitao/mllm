@@ -38,27 +38,27 @@ For reference, **Qwen3-1.7B** single card ≈ **63 tok/s** (too small for 4-card
 
 ## Context-length sweep — 1 card vs 4 cards
 
-Qwen3-8B, **prompt-len = ctx-len − 32**, 32 tokens generated. Each (ctx-len, device-count) is a **separately compiled QPC** (from the repacked ONNX with a matching `specializations.json`). Prefill / decode / E2E are QEfficient's inline stats. *(updating live as the sweep runs)*
+Qwen3-8B, **prompt-len = ctx-len − 32**, 32 tokens generated. Each (ctx-len, device-count) is a **separately compiled QPC** (from the repacked ONNX with a matching `specializations.json`). Prefill / decode tok/s / E2E are QEfficient's inline stats; **decode (s) = 32 ÷ decode tok/s** (total time to generate the 32 tokens).
 
 **1 card `[0]`**
 
-| ctx-len | prompt-len | prefill (s) | decode tok/s | E2E (s) |
-|---:|---:|---:|---:|---:|
-| 128 | 96 | 0.08 | 15.39 | 2.10 |
-| 256 | 224 | 0.18 | 15.39 | 2.20 |
-| 512 | 480 | 0.48 | 15.15 | 2.53 |
-| 1024 | 992 | 0.73 | 14.97 | 2.80 |
-| 2048 | 2016 | 1.24 | 14.47 | 3.38 |
+| ctx-len | prompt-len | prefill (s) | decode tok/s | decode (s) | E2E (s) |
+|---:|---:|---:|---:|---:|---:|
+| 128 | 96 | 0.08 | 15.39 | 2.08 | 2.10 |
+| 256 | 224 | 0.18 | 15.39 | 2.08 | 2.20 |
+| 512 | 480 | 0.48 | 15.15 | 2.11 | 2.53 |
+| 1024 | 992 | 0.73 | 14.97 | 2.14 | 2.80 |
+| 2048 | 2016 | 1.24 | 14.47 | 2.21 | 3.38 |
 
 **4 cards `[0,1,2,3]` (tensor-parallel)**
 
-| ctx-len | prompt-len | prefill (s) | decode tok/s | E2E (s) |
-|---:|---:|---:|---:|---:|
-| 128 | 96 | 0.05 | 49.74 | 0.67 |
-| 256 | 224 | 0.08 | 50.31 | 0.70 |
-| 512 | 480 | 0.29 | 51.42 | 0.90 |
-| 1024 | 992 | 0.34 | 48.33 | 0.99 |
-| 2048 | 2016 | 0.97 | 50.38 | 1.59 |
+| ctx-len | prompt-len | prefill (s) | decode tok/s | decode (s) | E2E (s) |
+|---:|---:|---:|---:|---:|---:|
+| 128 | 96 | 0.05 | 49.74 | 0.64 | 0.67 |
+| 256 | 224 | 0.08 | 50.31 | 0.64 | 0.70 |
+| 512 | 480 | 0.29 | 51.42 | 0.62 | 0.90 |
+| 1024 | 992 | 0.34 | 48.33 | 0.66 | 0.99 |
+| 2048 | 2016 | 0.97 | 50.38 | 0.64 | 1.59 |
 
 **4-card speedup vs 1 card**
 
