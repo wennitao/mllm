@@ -58,7 +58,7 @@ Qwen3-8B, **prompt-len = ctx-len − 32**, 32 tokens generated. Each (ctx-len, d
 | 256 | 224 | 0.08 | 50.31 | 0.70 |
 | 512 | 480 | 0.29 | 51.42 | 0.90 |
 | 1024 | 992 | 0.34 | 48.33 | 0.99 |
-| 2048 | 2016 | ⏳ | ⏳ | ⏳ |
+| 2048 | 2016 | 0.97 | 50.38 | 1.59 |
 
 **4-card speedup vs 1 card**
 
@@ -68,9 +68,13 @@ Qwen3-8B, **prompt-len = ctx-len − 32**, 32 tokens generated. Each (ctx-len, d
 | 256 | 3.27× | 2.25× | 3.14× |
 | 512 | 3.39× | 1.66× | 2.81× |
 | 1024 | 3.23× | 2.15× | 2.83× |
-| 2048 | ⏳ | ⏳ | ⏳ |
+| 2048 | 3.48× | 1.28× | 2.13× |
 
-_Takeaways: to be filled once the sweep completes (expected: decode speedup strong at short/medium ctx, softening at long ctx as the per-layer p2p all-reduce grows; prefill speedup growing with ctx as the big matmuls split cleanly)._
+**Takeaways (Qwen3-8B — differs from the small Qwen2.5-1.5B):**
+- **Decode — strong and flat, ~3.2–3.5× across the whole range.** 4-card decode holds ~48–51 tok/s at every context length while 1-card gently eases (15.4→14.5 tok/s), so the speedup even *widens* slightly to **3.48× at 2048**. This is the opposite of Qwen2.5-1.5B, whose decode speedup collapsed to 1.27× at 2048 — the 1.5B is too small, so the per-layer p2p all-reduce dominates. At 8B the per-card compute is big enough that decode stays compute-bound and scales well even at long context.
+- **Prefill — modest and non-monotonic, 1.3–2.3×, weakest at 2048 (1.28×).** The big prefill matmuls split across cards, but the p2p all-reduce cost grows with sequence length, so at 2048 the 4-card prefill (0.97 s) gives back much of the win. (Again opposite the 1.5B, whose *prefill* speedup grew to 2.35× at 2048.)
+- **E2E — 3.1× at short ctx → 2.1× at 2048.** As context grows, prefill becomes a larger share of end-to-end time, and since prefill scales worse than decode on 4 cards, the overall E2E speedup drifts down even though decode stays ~3.5×.
+- **Net:** for Qwen3-8B, 4-card is a **consistent ~3× E2E win** that is **decode-driven** and holds up across context length — most valuable for generation-heavy workloads; the long-context prefill is where tensor-parallel helps least.
 
 ---
 
