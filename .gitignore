@@ -48,4 +48,8 @@ autotuner.log
 
 Qwen3-1.7b/
 Qwen3-1.7b-mllm/
-Qwen3-1.7B-w4a8-i8mm-kai/
+Qwen3-1.7B-w4a8-i8mm-kai/# AI 100 per-op profiling: keep scripts + small results, ignore heavy generated data
+perop/**/out/*.trace.json
+perop/**/stats/
+perop/**/qpc
+perop/**/*.bin

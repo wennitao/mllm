@@ -6,17 +6,63 @@ Running **Qwen3** (1.7B / 8B) on `ur-ai100-ws-02` (4× Cloud AI 100 Ultra, SDK *
 
 ---
 
-## TL;DR — run it
+## TL;DR — run it (prints prefill + decode stats)
 
 ```bash
-# Qwen3-8B, 1 card
+# Qwen3-8B, 1 card  [0]
 sg qaic -c 'bash /home/chihao/models/run_qwen3_8b_npu.sh "what is the capital of china"'
 
-# Qwen3-8B, 4 cards (tensor-parallel, ~3.3x faster)
+# Qwen3-8B, 4 cards  [0,1,2,3]  (tensor-parallel, ~3.3x faster)
 sg qaic -c 'bash /home/chihao/models/run_qwen3_8b_4card.sh "what is the capital of china"'
+
+# 1 card vs 4 cards — same prompt, both configs, both stat blocks:
+sg qaic -c 'bash /home/chihao/models/compare_1v4_qwen3_8b.sh "what is the capital of china"'
+```
+
+Each run prints its timing block:
+```
+========================= Performance Stats =========================
+Average Prefill time a.k.a TTFT is= 0.08 sec      # 4-card: ~0.03 sec
+Decode is= 15.36 tokens/sec                        # 4-card: ~50.6 tokens/sec
+Total is= 14.87 tokens/sec
+Total (E2E) inference time is= 2.62 sec            # 4-card: ~0.80 sec
+=====================================================================
 ```
 
 Replace the quoted text with your own prompt (must be **non-empty and quoted** — an empty prompt triggers a QEfficient `UnboundLocalError`). Edit `--generation_len 40` inside a script for longer answers.
+
+| Script | Config | QPC | Decode |
+|---|---|---|---|
+| `run_qwen3_8b_npu.sh` | 1 card `[0]` | `qwen3_8b_repacked/qpc` | ~15 tok/s |
+| `run_qwen3_8b_4card.sh` | 4 cards `[0,1,2,3]` | `qwen3_8b_4card/qpc` | ~50 tok/s |
+| `compare_1v4_qwen3_8b.sh` | both, back-to-back | — | prints both |
+
+---
+
+## Live interactive chat (ask Qwen3-8B on the NPU)
+
+The one-shot scripts above reload the QPC every call. For a **live REPL** — load once, then ask many questions — use the chat script (loads the QPC once onto the cards, streams answers):
+
+```bash
+sg qaic -c 'bash /home/chihao/models/chat_qwen3.sh'
+```
+Qwen3-8B, 4 cards, ~50 tok/s. Type questions, `exit`/`quit`/Ctrl-D to leave. Qwen3 **thinking mode is on** by default (it reasons before answering).
+
+**Options** (env vars before the command):
+```bash
+sg qaic -c 'THINK=off GEN=150 bash /home/chihao/models/chat_qwen3.sh'   # concise, no reasoning
+sg qaic -c 'GEN=800 bash /home/chihao/models/chat_qwen3.sh'             # longer answers
+# other configs:
+sg qaic -c 'QPC=/home/chihao/models/qwen3_8b_repacked/qpc DEVS=0 CTX=256 bash /home/chihao/models/chat_qwen3.sh'                 # 1 card 8B
+sg qaic -c 'QPC=/home/chihao/models/qwen3_repacked/qpc DEVS=0 CTX=256 MODEL=Qwen/Qwen3-1.7B bash /home/chihao/models/chat_qwen3.sh'  # 1.7B, snappiest
+```
+| Env | Default | Effect |
+|---|---|---|
+| `THINK` | `1` | Qwen3 reasoning; `off` = `/no_think` concise answers |
+| `GEN` | `400` | max tokens per answer |
+| `QPC` / `DEVS` / `CTX` / `MODEL` | 4-card ctx2048 8B | swap model / card set |
+
+Must run in an **interactive terminal** (it reads `input()`). Empty input is ignored (avoids the QEfficient crash).
 
 ---
 

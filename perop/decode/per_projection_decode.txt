@@ -1,0 +1,33 @@
+# trace: aic-profiling-program-0-inf-1-QAicGraph-aiccyclecounts_QAicGraph_.qaic-opstats.trace.json
+# total opPCycle summed over ALL 16 NSP cores & threads = 718,426,233
+
+projection           pcycles   share%         ucycles  op_count
+----------------------------------------------------------------
+q_proj            32,593,873    4.54%       5,293,845    15,818
+k_proj            15,357,496    2.14%       1,113,303     4,422
+v_proj            13,920,495    1.94%         836,265     4,454
+o_proj            44,525,011    6.20%       6,679,268    19,373
+gate_proj        158,873,027   22.11%      33,227,712    43,072
+up_proj          214,099,623   29.80%      37,445,280    41,952
+down_proj        161,922,872   22.54%      15,964,830    22,960
+lm_head           39,016,326    5.43%      13,771,872    15,516
+attn_other        22,246,022    3.10%       1,306,893    22,858
+mlp_other         10,638,738    1.48%         255,228     5,760
+other              5,232,750    0.73%       1,000,484     4,019
+----------------------------------------------------------------
+TOTAL            718,426,233  100.00%
+
+# per-projection split by op-kind (pcycles) — top kinds
+  q_proj       blockdequantize_mxfp6=66%, aicconvolutiond32=15%, aiccopytovtcm=9%, aicmmap=5%
+  k_proj       blockdequantize_mxfp6=60%, aicconvolutiond32=15%, aicmmap=11%, aiccopytovtcm=7%
+  v_proj       blockdequantize_mxfp6=60%, aicconvolutiond32=16%, aicmmap=14%, aicmunmap=5%
+  o_proj       blockdequantize_mxfp6=58%, aicconvolutiond32=22%, aiccopytovtcm=7%, aicmmap=4%
+  gate_proj    blockdequantize_mxfp6=64%, aicconvolutiond32=25%, aiccopytovtcm=7%, aicmmap=1%
+  up_proj      blockdequantize_mxfp6=75%, aicconvolutiond32=17%, aiccopytovtcm=6%, aicmmap=1%
+  down_proj    blockdequantize_mxfp6=75%, aicconvolutiond32=14%, aicmmap=4%, aiccopytovtcm=2%
+  lm_head      blockdequantize_mxfp6=51%, aicconvolutiond32=34%, aiccopytovtcm=10%, aicmmap=1%
+  attn_other   inserttensor=21%, aicmulticastvtcm=9%, aicconvertweightstod32=9%, aicsoftmax=7%
+  mlp_other    elementmul=52%, sigmoid=45%, aicmulticastvtcm=3%
+  other        aicnormalizationpost=44%, aicnormalizationpre=20%, aicmulticastvtcm=18%, aicendcyclestats=7%
+
+# CSV written: /home/chihao/mllm/perop/decode/per_projection_decode.csv

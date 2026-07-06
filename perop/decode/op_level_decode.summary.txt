@@ -1,0 +1,1189 @@
+Specialization: QAicGraph
+
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c0    1049954      82.44%         N/A         N/A   3101         N/A         N/A         N/A            N/A  sync HMX
+c0    1043910      81.97%         N/A         N/A   3096   360231.62        2.90         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c0     542723      42.61%    29345086      42.95%   3033   923904.00        0.59       31.76          31.60  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c0     491954      38.63%         N/A         N/A   5161         N/A         N/A         N/A            N/A  sync HVX
+c0     344921      27.08%         N/A         N/A    314         N/A         N/A         N/A            N/A  sync DMAIssue
+c0     166536      13.08%     8828825      12.92%   3105   218934.00        0.76       40.33          37.77  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c0     131507      10.33%         N/A         N/A     72    36864.00        3.57         N/A            N/A  aiccopyddr DMAIssue DDR 
+c0      52798       4.15%         N/A         N/A   5161         N/A         N/A         N/A            N/A  barrier HVX
+c0      33371       2.62%     1796263       2.63%    173        1.35    24690.68  1329026.96      537956.25  aicmmap DMAIssue CacheableDDR (index32)
+c0      25415       2.00%         N/A         N/A   3087         N/A         N/A         N/A            N/A  barrier HMX
+c0      25141       1.97%         N/A         N/A    326     4629.35        5.43         N/A            N/A  aicmulticastvtcm HVX TCM 
+c0      24169       1.90%         N/A         N/A    213       31.28      772.64         N/A            N/A  aiccopysamevtcm HVX TCM 
+c0      16007       1.26%         N/A         N/A     72       18.00      889.28         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c0      14246       1.12%      756789       1.11%    173        1.35    10540.39   559936.37      201528.85  aicmunmap DMAIssue CacheableDDR (index32)
+c0      13528       1.06%         N/A         N/A     72     2304.00        5.87         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c0       7872       0.62%      426813       0.62%    288     3465.00        2.27      123.18        3211.75  elementmul  HVX TCM (float16)
+c0       6780       0.53%         N/A         N/A    108     2322.00        2.92         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c0       5528       0.43%      297572       0.44%    108     9216.28        0.60       32.29      142804.87  inserttensor HVX TCM 
+c0       4525       0.36%      245436       0.36%    108     1728.00        2.62      142.03         134.39  sigmoid  HVX TCM (float16)
+c0       4123       0.32%         N/A         N/A     36     1152.00        3.58         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c0       3818       0.30%      203956       0.30%    109       41.00       93.12     4974.54        8256.00  aicnormalizationpost HVX TCM (float16, float)
+c0       3804       0.30%         N/A         N/A     38       18.56      204.93         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c0       3653       0.29%         N/A         N/A     15        2.12     1719.06         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c0       3340       0.26%      180468       0.26%    144       36.00       92.78     5013.00       13109.17  batchedadd HVX TCM (float16)
+c0       3119       0.24%         N/A         N/A     72       36.00       86.64         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c0       2724       0.21%      144695       0.21%    362      135.56       20.09     1067.37        4547.36  aicconvertfromd32 HVX TCM (float16)
+c0       2331       0.18%      126337       0.18%    145     2896.00        0.80       43.62          67.80  aicconverttod32 HVX TCM (float16, i8)
+c0       2299       0.18%      123583       0.18%     72     1728.00        1.33       71.52          44.75  aicconvertweightstod32 HVX TCM (float16)
+c0       1809       0.14%       97719       0.14%    109        0.85     2124.33   114752.59      147885.68  aicnormalizationpre HVX TCM (float, float16)
+c0       1526       0.12%       82010       0.12%     36       36.00       42.39     2278.06        1333.56  aicsoftmax HVX TCM (float16, i8, index32)
+c0       1205       0.09%         N/A         N/A      5        0.26     4604.18         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c0       1150       0.09%         N/A         N/A      3        1.00     1150.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c0       1110       0.09%       59851       0.09%     36     1152.00        0.96       51.95          51.51  aicselectsplatrange HVX TCM (float16, index32)
+c0        766       0.06%       40975       0.06%    142       36.00       21.28     1138.19        3114.93  convertto HVX TCM (float16, float)
+c0        728       0.06%       38774       0.06%    142       72.00       10.11      538.53        1448.78  convertto HVX TCM (float, float16)
+c0        664       0.05%         N/A         N/A    347         N/A         N/A         N/A            N/A  barrier DMAIssue
+c0        588       0.05%       31395       0.05%     72       22.50       26.13     1395.33        6172.68  elementadd  HVX TCM (float16)
+c0        559       0.04%         N/A         N/A      1        0.00   143104.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c0        523       0.04%       28151       0.04%     72       36.00       14.53      781.97         492.79  aicbroadcastmul HVX TCM (float16)
+c0        466       0.04%       24908       0.04%     72       11.25       41.42     2214.04        9579.47  elementneg  HVX TCM (float16)
+c0        461       0.04%       24937       0.04%     36       18.00       25.61     1385.39         497.18  aicnormalization HVX TCM (float16)
+c0        383       0.03%       20385       0.03%     36     1152.00        0.33       17.70           5.32  aicconverttod32 HVX TCM (float16, i8, bool)
+c0        328       0.03%       17038       0.02%      1    59580.55        0.01        0.29           0.00  aicendcyclestats HVX DDR (i8)
+c0        324       0.03%       16832       0.02%      1    59580.55        0.01        0.28           0.00  aicendcyclestats HMX DDR (i8)
+c0        134       0.01%        7133       0.01%     36       36.00        3.72      198.14         177.02  aicmulsplat  HVX TCM (float16)
+c0         69       0.01%        3569       0.01%      1    59580.55        0.00        0.06           0.00  aicendcyclestats DMAIssue DDR (i8)
+c0         44       0.00%        2242       0.00%      1        0.00    11264.00   573952.00           0.00  argmax HVX CacheableDDR (index32)
+c0         39       0.00%         N/A         N/A      1        0.50       78.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c0         37       0.00%         N/A         N/A      1        0.00     9472.00         N/A            N/A  aicmulticastvtcm HVX CacheableDDR 
+c0         24       0.00%        1230       0.00%      1    36864.01        0.00        0.03           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c0         15       0.00%         779       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c0          6       0.00%         293       0.00%      1        0.12       48.00     2344.00           0.00  splat  HVX TCM (index32)
+
+c0 total:         1273568 ucycles        68324464 pcycles (thread max)
+c0    t0 HVX              1273310 ucycles [78843106017, 78844379327]        68311075 pcycles  46.73% utilization
+c0    t1 HVX              1273310 ucycles [78843106017, 78844379327]        68311084 pcycles  44.71% utilization
+c0    t2 HVX              1273310 ucycles [78843106017, 78844379327]        68311073 pcycles  44.37% utilization
+c0    t3 HVX              1273310 ucycles [78843106017, 78844379327]        68311085 pcycles  45.76% utilization
+c0    t4 HMX              1273310 ucycles [78843106017, 78844379327]        68311076 pcycles  12.95% utilization
+c0    t5 DMAIssue         1273568 ucycles [78843106017, 78844379585]        68324464 pcycles   7.68% utilization
+
+
+c00t0 batch ucycles:          1273310 [78843106017,78844379327]    pcycles:        68311075 
+c00t1 batch ucycles:          1273310 [78843106017,78844379327]    pcycles:        68311084 
+c00t2 batch ucycles:          1273310 [78843106017,78844379327]    pcycles:        68311073 
+c00t3 batch ucycles:          1273310 [78843106017,78844379327]    pcycles:        68311085 
+c00t4 batch ucycles:          1273310 [78843106017,78844379327]    pcycles:        68311076 
+c00t5 batch ucycles:          1273568 [78843106017,78844379585]    pcycles:        68324464 
+c0: Total inference pcycle is 68324469
+c0: Effective frequency is 1030.04MHz
+c00t0 activate ucycles:             21439
+c00t1 activate ucycles:             20696
+c00t2 activate ucycles:             21190
+c00t3 activate ucycles:             21026
+c00t4 activate ucycles:             20848
+c00t5 activate ucycles:             21324
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c1    1072261      84.10%         N/A         N/A   3027   359501.12        2.98         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c1    1048196      82.21%         N/A         N/A   3104         N/A         N/A         N/A            N/A  sync HMX
+c1     544546      42.71%    29498138      43.09%   3033   923904.00        0.59       31.93          31.12  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c1     483888      37.95%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c1     220113      17.26%         N/A         N/A    207         N/A         N/A         N/A            N/A  sync DMAIssue
+c1     154616      12.13%     8234422      12.03%   3105   218934.00        0.71       37.61          35.68  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c1      54676       4.29%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c1      38991       3.06%         N/A         N/A   3086         N/A         N/A         N/A            N/A  barrier HMX
+c1      27210       2.13%         N/A         N/A    398     3488.60        7.80         N/A            N/A  aicmulticastvtcm HVX TCM 
+c1      22481       1.76%     1209857       1.77%    119        0.93    24181.24  1301358.79      440350.98  aicmmap DMAIssue CacheableDDR (index32)
+c1      14804       1.16%         N/A         N/A    249       33.53      441.50         N/A            N/A  aiccopysamevtcm HVX TCM 
+c1       9430       0.74%      504174       0.74%    119        0.93    10143.19   542304.81      237458.85  aicmunmap DMAIssue CacheableDDR (index32)
+c1       6616       0.52%      356282       0.52%    288     3465.00        1.91      102.82        1193.42  elementmul  HVX TCM (float16)
+c1       5928       0.46%      317709       0.46%    108     9216.28        0.64       34.47      141201.24  inserttensor HVX TCM 
+c1       5795       0.45%         N/A         N/A    108     2322.00        2.50         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c1       5570       0.44%      302228       0.44%    108     1728.00        3.22      174.90         164.12  sigmoid  HVX TCM (float16)
+c1       3902       0.31%         N/A         N/A     36     1152.00        3.39         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c1       3313       0.26%      177470       0.26%    362      135.56       24.44     1309.14        5414.01  aicconvertfromd32 HVX TCM (float16)
+c1       3276       0.26%         N/A         N/A     38       18.56      176.48         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c1       3022       0.24%         N/A         N/A     72       18.00      167.89         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c1       2917       0.23%      155769       0.23%    109       41.00       71.15     3799.24        5456.15  aicnormalizationpost HVX TCM (float16, float)
+c1       2894       0.23%         N/A         N/A     72       36.00       80.39         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c1       2503       0.20%      135009       0.20%     72     1728.00        1.45       78.13          44.11  aicconvertweightstod32 HVX TCM (float16)
+c1       2487       0.20%      133917       0.20%     36       36.00       69.08     3719.92        1981.45  aicsoftmax HVX TCM (float16, i8, index32)
+c1       2175       0.17%      116623       0.17%    144       36.00       60.42     3239.53        9853.30  batchedadd HVX TCM (float16)
+c1       2091       0.16%      112864       0.16%    145     2896.00        0.72       38.97          54.50  aicconverttod32 HVX TCM (float16, i8)
+c1       2081       0.16%      112030       0.16%    142       36.00       57.81     3111.94        7686.35  convertto HVX TCM (float16, float)
+c1       1284       0.10%         N/A         N/A     12        1.62      790.15         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c1       1212       0.10%       63851       0.09%    109        0.85     1423.27    74980.99      138244.11  aicnormalizationpre HVX TCM (float, float16)
+c1       1140       0.09%       62440       0.09%     72       22.50       50.67     2775.11       11260.37  elementadd  HVX TCM (float16)
+c1       1004       0.08%       53671       0.08%    142       72.00       13.94      745.43        2220.81  convertto HVX TCM (float, float16)
+c1        885       0.07%       47007       0.07%     36     1152.00        0.77       40.80          34.91  aicselectsplatrange HVX TCM (float16, index32)
+c1        596       0.05%         N/A         N/A      2        0.01    76288.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c1        553       0.04%       29949       0.04%     72       36.00       15.36      831.92         525.84  aicbroadcastmul HVX TCM (float16)
+c1        498       0.04%         N/A         N/A      4        0.26     1931.64         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c1        492       0.04%       26325       0.04%     36       18.00       27.33     1462.50         458.99  aicnormalization HVX TCM (float16)
+c1        451       0.04%         N/A         N/A    238         N/A         N/A         N/A            N/A  barrier DMAIssue
+c1        427       0.03%       22621       0.03%     36       36.00       11.86      628.36         684.08  aicmulsplat  HVX TCM (float16)
+c1        276       0.02%         N/A         N/A      1        0.50      552.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c1        215       0.02%       11682       0.02%     72       11.25       19.11     1038.40        1357.07  elementneg  HVX TCM (float16)
+c1        142       0.01%        7383       0.01%      1    59580.55        0.00        0.12           0.00  aicendcyclestats HVX DDR (i8)
+c1        137       0.01%        7147       0.01%      1    59580.55        0.00        0.12           0.00  aicendcyclestats HMX DDR (i8)
+c1         69       0.01%        3580       0.01%      1    59580.55        0.00        0.06           0.00  aicendcyclestats DMAIssue DDR (i8)
+c1         57       0.00%         N/A         N/A      1        0.50      114.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c1         22       0.00%        1111       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c1         11       0.00%         596       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c1          6       0.00%         307       0.00%      1        0.12       48.00     2456.00           0.00  splat  HVX TCM (index32)
+
+c1 total:         1274986 ucycles        68454292 pcycles (thread max)
+c1    t0 HVX              1274657 ucycles [78843106014, 78844380671]        68437194 pcycles  45.72% utilization
+c1    t1 HVX              1274657 ucycles [78843106014, 78844380671]        68437188 pcycles  45.34% utilization
+c1    t2 HVX              1274657 ucycles [78843106014, 78844380671]        68437190 pcycles  46.36% utilization
+c1    t3 HVX              1274657 ucycles [78843106014, 78844380671]        68437181 pcycles  46.31% utilization
+c1    t4 HMX              1274657 ucycles [78843106014, 78844380671]        68437178 pcycles  12.05% utilization
+c1    t5 DMAIssue         1274986 ucycles [78843106014, 78844381000]        68454292 pcycles   6.32% utilization
+
+
+c01t0 batch ucycles:          1274657 [78843106014,78844380671]    pcycles:        68437194 
+c01t1 batch ucycles:          1274657 [78843106014,78844380671]    pcycles:        68437188 
+c01t2 batch ucycles:          1274657 [78843106014,78844380671]    pcycles:        68437190 
+c01t3 batch ucycles:          1274657 [78843106014,78844380671]    pcycles:        68437181 
+c01t4 batch ucycles:          1274657 [78843106014,78844380671]    pcycles:        68437178 
+c01t5 batch ucycles:          1274986 [78843106014,78844381000]    pcycles:        68454292 
+c1: Total inference pcycle is 68454292
+c1: Effective frequency is 1030.85MHz
+c01t0 activate ucycles:             21632
+c01t1 activate ucycles:             21533
+c01t2 activate ucycles:             21360
+c01t3 activate ucycles:             21164
+c01t4 activate ucycles:             20976
+c01t5 activate ucycles:              2104
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c2    1080642      84.61%         N/A         N/A   3024   359501.25        3.01         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c2    1048466      82.09%         N/A         N/A   3100         N/A         N/A         N/A            N/A  sync HMX
+c2     540007      42.28%    29268572      42.68%   3033   923904.00        0.58       31.68          32.20  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c2     496295      38.86%         N/A         N/A   5160         N/A         N/A         N/A            N/A  sync HVX
+c2     210262      16.46%         N/A         N/A    216         N/A         N/A         N/A            N/A  sync DMAIssue
+c2     166758      13.06%     8900975      12.98%   3105   218934.00        0.76       40.66          37.52  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c2      57269       4.48%         N/A         N/A   5160         N/A         N/A         N/A            N/A  barrier HVX
+c2      29684       2.32%         N/A         N/A   3076         N/A         N/A         N/A            N/A  barrier HMX
+c2      25568       2.00%         N/A         N/A    398     4638.35        5.51         N/A            N/A  aicmulticastvtcm HVX TCM 
+c2      22026       1.72%     1185716       1.73%    119        0.93    23691.83  1275392.00      419775.39  aicmmap DMAIssue CacheableDDR (index32)
+c2      21705       1.70%         N/A         N/A    213       31.28      693.87         N/A            N/A  aiccopysamevtcm HVX TCM 
+c2      14654       1.15%         N/A         N/A     72     2304.00        6.36         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c2       9979       0.78%      530674       0.77%    119        0.93    10733.71   570809.01      265721.59  aicmunmap DMAIssue CacheableDDR (index32)
+c2       7559       0.59%      409615       0.60%    288     3465.00        2.18      118.22        5590.60  elementmul  HVX TCM (float16)
+c2       6676       0.52%         N/A         N/A    108     2322.00        2.88         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c2       5490       0.43%      294774       0.43%    108     9216.28        0.60       31.98       91454.13  inserttensor HVX TCM 
+c2       5290       0.41%      286287       0.42%    108     1728.00        3.06      165.68         162.92  sigmoid  HVX TCM (float16)
+c2       4061       0.32%      218151       0.32%    362      135.56       29.96     1609.23       10919.14  aicconvertfromd32 HVX TCM (float16)
+c2       3924       0.31%         N/A         N/A     36     1152.00        3.41         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c2       3810       0.30%         N/A         N/A     38       18.56      205.25         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c2       3335       0.26%         N/A         N/A     72       18.00      185.28         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c2       3327       0.26%      179091       0.26%    109       41.00       81.15     4368.07        6793.26  aicnormalizationpost HVX TCM (float16, float)
+c2       2978       0.23%         N/A         N/A     72       36.00       82.72         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c2       2468       0.19%      131463       0.19%     72     1728.00        1.43       76.08          47.41  aicconvertweightstod32 HVX TCM (float16)
+c2       2391       0.19%      127872       0.19%    145     2896.00        0.83       44.15          65.08  aicconverttod32 HVX TCM (float16, i8)
+c2       2217       0.17%      118384       0.17%    144       36.00       61.58     3288.44       14294.55  batchedadd HVX TCM (float16)
+c2       1890       0.15%      102388       0.15%     36       36.00       52.50     2844.11        1883.95  aicsoftmax HVX TCM (float16, i8, index32)
+c2       1481       0.12%       79349       0.12%    109        0.85     1739.16    93180.48      154418.26  aicnormalizationpre HVX TCM (float, float16)
+c2       1253       0.10%       67683       0.10%     36     1152.00        1.09       58.75          49.31  aicselectsplatrange HVX TCM (float16, index32)
+c2       1129       0.09%       60655       0.09%    142       72.00       15.68      842.43        4330.39  convertto HVX TCM (float, float16)
+c2        841       0.07%       44729       0.07%    142       36.00       23.36     1242.47        3957.82  convertto HVX TCM (float16, float)
+c2        677       0.05%       36500       0.05%     72       22.50       30.09     1622.22        7925.24  elementadd  HVX TCM (float16)
+c2        658       0.05%         N/A         N/A      2        0.01    84224.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c2        636       0.05%       34268       0.05%     72       11.25       56.53     3046.04       16024.81  elementneg  HVX TCM (float16)
+c2        562       0.04%       29902       0.04%     72       36.00       15.61      830.61         557.41  aicbroadcastmul HVX TCM (float16)
+c2        406       0.03%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c2        396       0.03%       21398       0.03%     36       18.00       22.00     1188.78         397.87  aicnormalization HVX TCM (float16)
+c2        393       0.03%       20714       0.03%     36     1152.00        0.34       17.98           5.30  aicconverttod32 HVX TCM (float16, i8, bool)
+c2        356       0.03%         N/A         N/A      2        0.01    45568.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c2        293       0.02%         N/A         N/A      1        0.50      586.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c2        276       0.02%         N/A         N/A      5        1.25      220.80         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c2        198       0.02%       10622       0.02%     36       36.00        5.50      295.06         483.24  aicmulsplat  HVX TCM (float16)
+c2        112       0.01%        5840       0.01%      1    59580.55        0.00        0.10           0.00  aicendcyclestats HMX DDR (i8)
+c2        112       0.01%        5818       0.01%      1    59580.55        0.00        0.10           0.00  aicendcyclestats HVX DDR (i8)
+c2         50       0.00%        2591       0.00%      1    59580.55        0.00        0.04           0.00  aicendcyclestats DMAIssue DDR (i8)
+c2         43       0.00%         N/A         N/A      1        0.50       86.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c2         13       0.00%         721       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c2         13       0.00%         694       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c2          7       0.00%         354       0.00%      1        0.12       56.00     2832.00           0.00  splat  HVX TCM (index32)
+
+c2 total:         1277241 ucycles        68584252 pcycles (thread max)
+c2    t0 HVX              1276898 ucycles [78843106019, 78844382917]        68566382 pcycles  45.32% utilization
+c2    t1 HVX              1276898 ucycles [78843106019, 78844382917]        68566394 pcycles  46.21% utilization
+c2    t2 HVX              1276898 ucycles [78843106019, 78844382917]        68566381 pcycles  44.48% utilization
+c2    t3 HVX              1276897 ucycles [78843106020, 78844382917]        68566407 pcycles  45.81% utilization
+c2    t4 HMX              1276894 ucycles [78843106020, 78844382914]        68566243 pcycles  12.99% utilization
+c2    t5 DMAIssue         1277241 ucycles [78843106019, 78844383260]        68584252 pcycles   6.58% utilization
+
+
+c02t0 batch ucycles:          1276898 [78843106019,78844382917]    pcycles:        68566382 
+c02t1 batch ucycles:          1276898 [78843106019,78844382917]    pcycles:        68566394 
+c02t2 batch ucycles:          1276898 [78843106019,78844382917]    pcycles:        68566381 
+c02t3 batch ucycles:          1276897 [78843106020,78844382917]    pcycles:        68566407 
+c02t4 batch ucycles:          1276894 [78843106020,78844382914]    pcycles:        68566243 
+c02t5 batch ucycles:          1277241 [78843106019,78844383260]    pcycles:        68584252 
+c2: Total inference pcycle is 68584252
+c2: Effective frequency is 1030.99MHz
+c02t0 activate ucycles:             20112
+c02t1 activate ucycles:             20011
+c02t2 activate ucycles:             19827
+c02t3 activate ucycles:             19619
+c02t4 activate ucycles:             19435
+c02t5 activate ucycles:              2103
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c3    1091272      85.45%         N/A         N/A   3025   359501.12        3.04         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c3    1046947      81.98%         N/A         N/A   3100         N/A         N/A         N/A            N/A  sync HMX
+c3     539064      42.21%    29219425      42.61%   3033   923904.00        0.58       31.63          31.63  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c3     491298      38.47%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c3     214344      16.78%         N/A         N/A    215         N/A         N/A         N/A            N/A  sync DMAIssue
+c3     157825      12.36%     8417689      12.27%   3105   218934.00        0.72       38.45          34.69  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c3      56516       4.43%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c3      39519       3.09%         N/A         N/A   3084         N/A         N/A         N/A            N/A  barrier HMX
+c3      23077       1.81%     1243419       1.81%    119        0.93    24822.32  1337459.09      408776.13  aicmmap DMAIssue CacheableDDR (index32)
+c3      21695       1.70%         N/A         N/A    398     3488.60        6.22         N/A            N/A  aicmulticastvtcm HVX TCM 
+c3      14875       1.16%         N/A         N/A    249       33.53      443.62         N/A            N/A  aiccopysamevtcm HVX TCM 
+c3       9704       0.76%      519484       0.76%    119        0.93    10437.92   558772.71      257928.71  aicmunmap DMAIssue CacheableDDR (index32)
+c3       6319       0.49%         N/A         N/A    108     2322.00        2.72         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c3       6308       0.49%      340418       0.50%    288     3465.00        1.82       98.24        6733.95  elementmul  HVX TCM (float16)
+c3       5993       0.47%      325619       0.47%    108     1728.00        3.47      188.44         172.35  sigmoid  HVX TCM (float16)
+c3       5393       0.42%      289918       0.42%    108     9216.28        0.59       31.46      150550.39  inserttensor HVX TCM 
+c3       4898       0.38%      264327       0.39%    144       36.00      136.06     7342.42       13239.71  batchedadd HVX TCM (float16)
+c3       4641       0.36%         N/A         N/A     36     1152.00        4.03         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c3       3942       0.31%         N/A         N/A     38       18.56      212.36         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c3       3772       0.30%      202484       0.30%    109       41.00       92.00     4938.63        9267.62  aicnormalizationpost HVX TCM (float16, float)
+c3       3685       0.29%         N/A         N/A     72       36.00      102.36         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c3       2964       0.23%         N/A         N/A     72       18.00      164.67         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c3       2571       0.20%      138066       0.20%    145     2896.00        0.89       47.67          64.94  aicconverttod32 HVX TCM (float16, i8)
+c3       2482       0.19%      133318       0.19%    109        0.85     2914.64   156556.92      222440.73  aicnormalizationpre HVX TCM (float, float16)
+c3       2470       0.19%      129855       0.19%    362      135.56       18.22      957.90        3301.77  aicconvertfromd32 HVX TCM (float16)
+c3       2022       0.16%      108385       0.16%     72     1728.00        1.17       62.72          46.60  aicconvertweightstod32 HVX TCM (float16)
+c3       1930       0.15%      102456       0.15%     36       36.00       53.61     2846.00        2986.79  aicsoftmax HVX TCM (float16, i8, index32)
+c3       1473       0.12%       80393       0.12%     72       11.25      130.93     7146.04       29784.54  elementneg  HVX TCM (float16)
+c3       1129       0.09%       60269       0.09%    142       72.00       15.68      837.07        2285.28  convertto HVX TCM (float, float16)
+c3        708       0.06%         N/A         N/A      2        0.01    90624.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c3        643       0.05%       33518       0.05%    142       36.00       17.86      931.06        5817.70  convertto HVX TCM (float16, float)
+c3        643       0.05%       34076       0.05%     36     1152.00        0.56       29.58          28.60  aicselectsplatrange HVX TCM (float16, index32)
+c3        612       0.05%       32698       0.05%     72       36.00       17.00      908.28         777.75  aicbroadcastmul HVX TCM (float16)
+c3        461       0.04%       24856       0.04%     36       18.00       25.61     1380.89         495.09  aicnormalization HVX TCM (float16)
+c3        417       0.03%         N/A         N/A      6        1.12      370.67         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c3        409       0.03%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c3        341       0.03%         N/A         N/A      2        0.01    43648.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c3        269       0.02%         N/A         N/A      1        0.50      538.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c3        260       0.02%       13691       0.02%     72       22.50       11.56      608.49        3312.28  elementadd  HVX TCM (float16)
+c3        117       0.01%        5999       0.01%     36       36.00        3.25      166.64         270.65  aicmulsplat  HVX TCM (float16)
+c3         95       0.01%        4919       0.01%      1    59580.55        0.00        0.08           0.00  aicendcyclestats HVX DDR (i8)
+c3         91       0.01%        4743       0.01%      1    59580.55        0.00        0.08           0.00  aicendcyclestats HMX DDR (i8)
+c3         52       0.00%        2729       0.00%      1    59580.55        0.00        0.05           0.00  aicendcyclestats DMAIssue DDR (i8)
+c3         41       0.00%         N/A         N/A      1        0.50       82.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c3         14       0.00%         758       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c3         11       0.00%         558       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c3          7       0.00%         338       0.00%      1        0.12       56.00     2704.00           0.00  splat  HVX TCM (index32)
+
+c3 total:         1277095 ucycles        68580138 pcycles (thread max)
+c3    t0 HVX              1276790 ucycles [78843106018, 78844382808]        68564245 pcycles  46.54% utilization
+c3    t1 HVX              1276789 ucycles [78843106019, 78844382808]        68564238 pcycles  46.10% utilization
+c3    t2 HVX              1276790 ucycles [78843106018, 78844382808]        68564245 pcycles  44.33% utilization
+c3    t3 HVX              1276789 ucycles [78843106019, 78844382808]        68564241 pcycles  44.34% utilization
+c3    t4 HMX              1276790 ucycles [78843106018, 78844382808]        68564241 pcycles  12.29% utilization
+c3    t5 DMAIssue         1277095 ucycles [78843106019, 78844383114]        68580138 pcycles   6.19% utilization
+
+
+c03t0 batch ucycles:          1276790 [78843106018,78844382808]    pcycles:        68564245 
+c03t1 batch ucycles:          1276789 [78843106019,78844382808]    pcycles:        68564238 
+c03t2 batch ucycles:          1276790 [78843106018,78844382808]    pcycles:        68564245 
+c03t3 batch ucycles:          1276789 [78843106019,78844382808]    pcycles:        68564241 
+c03t4 batch ucycles:          1276790 [78843106018,78844382808]    pcycles:        68564241 
+c03t5 batch ucycles:          1277095 [78843106019,78844383114]    pcycles:        68580138 
+c3: Total inference pcycle is 68580147
+c3: Effective frequency is 1031.04MHz
+c03t0 activate ucycles:             21689
+c03t1 activate ucycles:             21572
+c03t2 activate ucycles:             21404
+c03t3 activate ucycles:             21230
+c03t4 activate ucycles:             21043
+c03t5 activate ucycles:              2094
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c4    1054197      82.95%         N/A         N/A   3102         N/A         N/A         N/A            N/A  sync HMX
+c4    1047149      82.40%         N/A         N/A   3028   359501.12        2.91         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c4     536750      42.24%    29094637      42.63%   3033   923904.00        0.58       31.49          30.50  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c4     487669      38.37%         N/A         N/A   5160         N/A         N/A         N/A            N/A  sync HVX
+c4     206700      16.27%         N/A         N/A    221         N/A         N/A         N/A            N/A  sync DMAIssue
+c4     157178      12.37%     8389111      12.29%   3105   218934.00        0.72       38.32          38.77  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c4      55949       4.40%         N/A         N/A   5160         N/A         N/A         N/A            N/A  barrier HVX
+c4      29532       2.32%         N/A         N/A   3085         N/A         N/A         N/A            N/A  barrier HMX
+c4      23654       1.86%         N/A         N/A    398     4638.35        5.10         N/A            N/A  aicmulticastvtcm HVX TCM 
+c4      22750       1.79%     1225031       1.79%    119        0.93    24470.59  1317680.40      460164.10  aicmmap DMAIssue CacheableDDR (index32)
+c4      18181       1.43%         N/A         N/A    213       31.28      581.21         N/A            N/A  aiccopysamevtcm HVX TCM 
+c4      12359       0.97%         N/A         N/A     72     2304.00        5.36         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c4       9768       0.77%      523051       0.77%    119        0.93    10506.76   562609.48      273709.50  aicmunmap DMAIssue CacheableDDR (index32)
+c4       7707       0.61%      416751       0.61%    288     3465.00        2.22      120.27        5009.79  elementmul  HVX TCM (float16)
+c4       6136       0.48%         N/A         N/A    108     2322.00        2.64         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c4       6091       0.48%      331942       0.49%    108     1728.00        3.52      192.10         195.22  sigmoid  HVX TCM (float16)
+c4       5200       0.41%      279505       0.41%    108     9216.28        0.56       30.33       57871.32  inserttensor HVX TCM 
+c4       3926       0.31%         N/A         N/A     38       18.56      211.50         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c4       3782       0.30%         N/A         N/A     72       18.00      210.11         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c4       3672       0.29%         N/A         N/A     36     1152.00        3.19         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c4       3575       0.28%      191009       0.28%    362      135.56       26.37     1409.01        6923.26  aicconvertfromd32 HVX TCM (float16)
+c4       3146       0.25%      169730       0.25%    109       41.00       76.73     4139.76        7401.25  aicnormalizationpost HVX TCM (float16, float)
+c4       2946       0.23%         N/A         N/A     72       36.00       81.83         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c4       2181       0.17%      117176       0.17%     72     1728.00        1.26       67.81          39.98  aicconvertweightstod32 HVX TCM (float16)
+c4       2127       0.17%      114337       0.17%    145     2896.00        0.73       39.48          60.34  aicconverttod32 HVX TCM (float16, i8)
+c4       2080       0.16%      111422       0.16%    144       36.00       57.78     3095.06        9034.08  batchedadd HVX TCM (float16)
+c4       1786       0.14%       96769       0.14%    109        0.85     2097.32   113636.99      166474.29  aicnormalizationpre HVX TCM (float, float16)
+c4       1593       0.13%       85849       0.13%     36       36.00       44.25     2384.69        1359.84  aicsoftmax HVX TCM (float16, i8, index32)
+c4       1072       0.08%       57632       0.08%    142       36.00       29.78     1600.89        5256.45  convertto HVX TCM (float16, float)
+c4       1052       0.08%       56439       0.08%    142       72.00       14.61      783.88        3050.61  convertto HVX TCM (float, float16)
+c4        958       0.08%       51526       0.08%     36     1152.00        0.83       44.73          32.20  aicselectsplatrange HVX TCM (float16, index32)
+c4        603       0.05%         N/A         N/A      2        0.01    77184.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c4        573       0.05%       30556       0.04%     72       22.50       25.47     1358.04        5897.85  elementadd  HVX TCM (float16)
+c4        557       0.04%       29901       0.04%     72       36.00       15.47      830.58         528.07  aicbroadcastmul HVX TCM (float16)
+c4        489       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c4        421       0.03%       22611       0.03%     36       18.00       23.39     1256.17         470.97  aicnormalization HVX TCM (float16)
+c4        408       0.03%       22299       0.03%     72       11.25       36.27     1982.13       10747.57  elementneg  HVX TCM (float16)
+c4        402       0.03%       21819       0.03%     36     1152.00        0.35       18.94           7.33  aicconverttod32 HVX TCM (float16, i8, bool)
+c4        378       0.03%         N/A         N/A      9        1.12      336.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c4        374       0.03%         N/A         N/A      2        0.01    47872.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c4        285       0.02%         N/A         N/A      1        0.50      570.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c4        218       0.02%       11307       0.02%      1    59580.55        0.00        0.19           0.00  aicendcyclestats HMX DDR (i8)
+c4        195       0.02%       10092       0.01%      1    59580.55        0.00        0.17           0.00  aicendcyclestats HVX DDR (i8)
+c4        187       0.01%        9973       0.01%     36       36.00        5.19      277.03         279.73  aicmulsplat  HVX TCM (float16)
+c4        103       0.01%        5386       0.01%      1    59580.55        0.00        0.09           0.00  aicendcyclestats DMAIssue DDR (i8)
+c4         51       0.00%        2650       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c4         39       0.00%         N/A         N/A      1        0.50       78.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c4         13       0.00%         686       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c4          6       0.00%         326       0.00%      1        0.12       48.00     2608.00           0.00  splat  HVX TCM (index32)
+
+c4 total:         1270816 ucycles        68252905 pcycles (thread max)
+c4    t0 HVX              1270417 ucycles [78843106020, 78844376437]        68232154 pcycles  45.16% utilization
+c4    t1 HVX              1270417 ucycles [78843106020, 78844376437]        68232145 pcycles  45.98% utilization
+c4    t2 HVX              1270417 ucycles [78843106020, 78844376437]        68232155 pcycles  44.28% utilization
+c4    t3 HVX              1270417 ucycles [78843106020, 78844376437]        68232147 pcycles  45.65% utilization
+c4    t4 HMX              1270417 ucycles [78843106020, 78844376437]        68232158 pcycles  12.32% utilization
+c4    t5 DMAIssue         1270816 ucycles [78843106020, 78844376836]        68252905 pcycles   6.34% utilization
+
+
+c04t0 batch ucycles:          1270417 [78843106020,78844376437]    pcycles:        68232154 
+c04t1 batch ucycles:          1270417 [78843106020,78844376437]    pcycles:        68232145 
+c04t2 batch ucycles:          1270417 [78843106020,78844376437]    pcycles:        68232155 
+c04t3 batch ucycles:          1270417 [78843106020,78844376437]    pcycles:        68232147 
+c04t4 batch ucycles:          1270417 [78843106020,78844376437]    pcycles:        68232158 
+c04t5 batch ucycles:          1270816 [78843106020,78844376836]    pcycles:        68252905 
+c4: Total inference pcycle is 68252911
+c4: Effective frequency is 1031.19MHz
+c04t0 activate ucycles:             21774
+c04t1 activate ucycles:             21673
+c04t2 activate ucycles:             21473
+c04t3 activate ucycles:             21293
+c04t4 activate ucycles:             21117
+c04t5 activate ucycles:              2108
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c5    1056491      83.15%         N/A         N/A   3107         N/A         N/A         N/A            N/A  sync HMX
+c5    1045219      82.26%         N/A         N/A   3027   359501.12        2.91         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c5     539542      42.46%    29282960      42.89%   3033   923904.00        0.58       31.69          30.66  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c5     477812      37.60%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c5     211762      16.67%         N/A         N/A    209         N/A         N/A         N/A            N/A  sync DMAIssue
+c5     142397      11.21%     7618419      11.16%   3105   218934.00        0.65       34.80          32.74  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c5      56678       4.46%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c5      40383       3.18%         N/A         N/A   3087         N/A         N/A         N/A            N/A  barrier HMX
+c5      23406       1.84%         N/A         N/A    398     3488.60        6.71         N/A            N/A  aicmulticastvtcm HVX TCM 
+c5      22955       1.81%     1234963       1.81%    119        0.93    24691.09  1328363.56      409743.11  aicmmap DMAIssue CacheableDDR (index32)
+c5      16488       1.30%         N/A         N/A    249       33.53      491.72         N/A            N/A  aiccopysamevtcm HVX TCM 
+c5       9906       0.78%      531750       0.78%    119        0.93    10655.19   571966.39      304512.16  aicmunmap DMAIssue CacheableDDR (index32)
+c5       7829       0.62%      423348       0.62%    288     3465.00        2.26      122.18        6199.50  elementmul  HVX TCM (float16)
+c5       5622       0.44%         N/A         N/A    108     2322.00        2.42         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c5       5211       0.41%      283085       0.41%    108     1728.00        3.02      163.82         182.09  sigmoid  HVX TCM (float16)
+c5       5074       0.40%      272252       0.40%    108     9216.28        0.55       29.54       78228.16  inserttensor HVX TCM 
+c5       3821       0.30%         N/A         N/A     38       18.56      205.85         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c5       3720       0.29%         N/A         N/A     36     1152.00        3.23         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c5       3369       0.27%      181158       0.27%    109       41.00       82.17     4418.49        5894.05  aicnormalizationpost HVX TCM (float16, float)
+c5       2988       0.24%         N/A         N/A     72       36.00       83.00         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c5       2774       0.22%         N/A         N/A     72       18.00      154.11         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c5       2341       0.18%      125266       0.18%    145     2896.00        0.81       43.25          60.81  aicconverttod32 HVX TCM (float16, i8)
+c5       2083       0.16%      110171       0.16%    362      135.56       15.37      812.70        3003.37  aicconvertfromd32 HVX TCM (float16)
+c5       2073       0.16%      111361       0.16%     36       36.00       57.58     3093.36        1753.47  aicsoftmax HVX TCM (float16, i8, index32)
+c5       2068       0.16%      110566       0.16%     72     1728.00        1.20       63.98          36.97  aicconvertweightstod32 HVX TCM (float16)
+c5       1810       0.14%       97485       0.14%    109        0.85     2125.50   114477.80      154046.42  aicnormalizationpre HVX TCM (float, float16)
+c5       1351       0.11%       71803       0.11%    142       72.00       18.76      997.26        2985.88  convertto HVX TCM (float, float16)
+c5       1343       0.11%       71627       0.10%    144       36.00       37.31     1989.64        4961.80  batchedadd HVX TCM (float16)
+c5       1264       0.10%       68195       0.10%    142       36.00       35.11     1894.31        4969.15  convertto HVX TCM (float16, float)
+c5        979       0.08%       53042       0.08%     36     1152.00        0.85       46.04          55.34  aicselectsplatrange HVX TCM (float16, index32)
+c5        612       0.05%       33030       0.05%     72       36.00       17.00      917.50         739.55  aicbroadcastmul HVX TCM (float16)
+c5        580       0.05%         N/A         N/A      2        0.01    74240.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c5        427       0.03%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c5        426       0.03%       22872       0.03%     36       18.00       23.67     1270.67         451.96  aicnormalization HVX TCM (float16)
+c5        387       0.03%       20450       0.03%     72       22.50       17.20      908.89        4763.12  elementadd  HVX TCM (float16)
+c5        360       0.03%         N/A         N/A      8        1.12      320.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c5        342       0.03%         N/A         N/A      2        0.01    43776.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c5        275       0.02%         N/A         N/A      1        0.50      550.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c5        254       0.02%       13506       0.02%     36       36.00        7.06      375.17         452.58  aicmulsplat  HVX TCM (float16)
+c5        232       0.02%       12060       0.02%      1    59580.55        0.00        0.20           0.00  aicendcyclestats HVX DDR (i8)
+c5        228       0.02%       11869       0.02%      1    59580.55        0.00        0.20           0.00  aicendcyclestats HMX DDR (i8)
+c5        221       0.02%       11969       0.02%     72       11.25       19.64     1063.91         755.06  elementneg  HVX TCM (float16)
+c5        108       0.01%        5594       0.01%      1    59580.55        0.00        0.09           0.00  aicendcyclestats DMAIssue DDR (i8)
+c5         49       0.00%        2533       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c5         25       0.00%         N/A         N/A      1        0.50       50.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c5         11       0.00%         557       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c5          6       0.00%         335       0.00%      1        0.12       48.00     2680.00           0.00  splat  HVX TCM (index32)
+
+c5 total:         1270644 ucycles        68275182 pcycles (thread max)
+c5    t0 HVX              1270309 ucycles [78843106022, 78844376331]        68257780 pcycles  45.37% utilization
+c5    t1 HVX              1270310 ucycles [78843106022, 78844376332]        68257791 pcycles  46.34% utilization
+c5    t2 HVX              1270310 ucycles [78843106022, 78844376332]        68257783 pcycles  45.96% utilization
+c5    t3 HVX              1270310 ucycles [78843106022, 78844376332]        68257783 pcycles  44.64% utilization
+c5    t4 HMX              1270310 ucycles [78843106022, 78844376332]        68257783 pcycles  11.18% utilization
+c5    t5 DMAIssue         1270644 ucycles [78843106022, 78844376666]        68275182 pcycles   6.49% utilization
+
+
+c05t0 batch ucycles:          1270309 [78843106022,78844376331]    pcycles:        68257780 
+c05t1 batch ucycles:          1270310 [78843106022,78844376332]    pcycles:        68257791 
+c05t2 batch ucycles:          1270310 [78843106022,78844376332]    pcycles:        68257783 
+c05t3 batch ucycles:          1270310 [78843106022,78844376332]    pcycles:        68257783 
+c05t4 batch ucycles:          1270310 [78843106022,78844376332]    pcycles:        68257783 
+c05t5 batch ucycles:          1270644 [78843106022,78844376666]    pcycles:        68275182 
+c5: Total inference pcycle is 68275193
+c5: Effective frequency is 1031.67MHz
+c05t0 activate ucycles:             21689
+c05t1 activate ucycles:             21577
+c05t2 activate ucycles:             21421
+c05t3 activate ucycles:             21227
+c05t4 activate ucycles:             21036
+c05t5 activate ucycles:              2107
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c6    1055926      83.92%         N/A         N/A   3092         N/A         N/A         N/A            N/A  sync HMX
+c6     932207      74.08%         N/A         N/A   3024   359501.12        2.59         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c6     543886      43.22%    29507875      43.63%   3033   923904.00        0.59       31.94          31.21  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c6     490089      38.95%         N/A         N/A   5160         N/A         N/A         N/A            N/A  sync HVX
+c6     191043      15.18%         N/A         N/A    208         N/A         N/A         N/A            N/A  sync DMAIssue
+c6     143294      11.39%     7665050      11.33%   3105   218934.00        0.65       35.01          39.01  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c6      55633       4.42%         N/A         N/A   5160         N/A         N/A         N/A            N/A  barrier HVX
+c6      28708       2.28%         N/A         N/A   3081         N/A         N/A         N/A            N/A  barrier HMX
+c6      22872       1.82%     1230963       1.82%    119        0.93    24601.82  1324061.04      434809.41  aicmmap DMAIssue CacheableDDR (index32)
+c6      20521       1.63%         N/A         N/A    398     4638.35        4.42         N/A            N/A  aicmulticastvtcm HVX TCM 
+c6      18542       1.47%         N/A         N/A    213       31.28      592.75         N/A            N/A  aiccopysamevtcm HVX TCM 
+c6      14017       1.11%         N/A         N/A     72     2304.00        6.08         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c6       9458       0.75%      508512       0.75%    119        0.93    10173.31   546970.89      258984.49  aicmunmap DMAIssue CacheableDDR (index32)
+c6       7696       0.61%         N/A         N/A    108     2322.00        3.31         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c6       6289       0.50%      339863       0.50%    288     3465.00        1.82       98.08         852.89  elementmul  HVX TCM (float16)
+c6       5273       0.42%      282743       0.42%    108     9216.28        0.57       30.68       75407.13  inserttensor HVX TCM 
+c6       4727       0.38%      257972       0.38%    108     1728.00        2.74      149.29         155.28  sigmoid  HVX TCM (float16)
+c6       4044       0.32%         N/A         N/A     36     1152.00        3.51         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c6       3797       0.30%         N/A         N/A     38       18.56      204.55         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c6       3589       0.29%         N/A         N/A     72       36.00       99.69         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c6       3177       0.25%      169436       0.25%    362      135.56       23.44     1249.87        6433.60  aicconvertfromd32 HVX TCM (float16)
+c6       2727       0.22%         N/A         N/A     72       18.00      151.50         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c6       2570       0.20%      138380       0.20%    109       41.00       62.68     3375.12        2600.72  aicnormalizationpost HVX TCM (float16, float)
+c6       2425       0.19%      130600       0.19%    145     2896.00        0.84       45.10          68.89  aicconverttod32 HVX TCM (float16, i8)
+c6       2241       0.18%      120330       0.18%     72     1728.00        1.30       69.64          50.33  aicconvertweightstod32 HVX TCM (float16)
+c6       1607       0.13%       86470       0.13%    144       36.00       44.64     2401.94        4803.12  batchedadd HVX TCM (float16)
+c6       1572       0.12%       84753       0.13%     36       36.00       43.67     2354.25        1309.65  aicsoftmax HVX TCM (float16, i8, index32)
+c6       1476       0.12%       78513       0.12%     36     1152.00        1.28       68.15          52.05  aicselectsplatrange HVX TCM (float16, index32)
+c6       1435       0.11%       77723       0.11%    109        0.85     1685.14    91271.05      136449.89  aicnormalizationpre HVX TCM (float, float16)
+c6       1032       0.08%       55415       0.08%    142       72.00       14.33      769.65        2203.63  convertto HVX TCM (float, float16)
+c6        908       0.07%       48692       0.07%    142       36.00       25.22     1352.56        4684.65  convertto HVX TCM (float16, float)
+c6        628       0.05%         N/A         N/A      2        0.01    80384.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c6        621       0.05%       33338       0.05%     72       36.00       17.25      926.06         759.45  aicbroadcastmul HVX TCM (float16)
+c6        568       0.05%         N/A         N/A      5        1.12      504.89         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c6        501       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c6        491       0.04%       26423       0.04%     36       18.00       27.28     1467.94         614.79  aicnormalization HVX TCM (float16)
+c6        401       0.03%       21538       0.03%     36     1152.00        0.35       18.70           7.24  aicconverttod32 HVX TCM (float16, i8, bool)
+c6        388       0.03%       20206       0.03%      1    59580.55        0.01        0.34           0.00  aicendcyclestats HMX DDR (i8)
+c6        359       0.03%         N/A         N/A      2        0.01    45952.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c6        326       0.03%       17058       0.03%     72       22.50       14.49      758.13        1077.04  elementadd  HVX TCM (float16)
+c6        317       0.03%       16487       0.02%      1    59580.55        0.01        0.28           0.00  aicendcyclestats HVX DDR (i8)
+c6        294       0.02%       16025       0.02%     72       11.25       26.13     1424.44        1834.29  elementneg  HVX TCM (float16)
+c6        284       0.02%         N/A         N/A      1        0.50      568.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c6        281       0.02%       14600       0.02%      1    59580.55        0.00        0.25           0.00  aicendcyclestats DMAIssue DDR (i8)
+c6        173       0.01%        9128       0.01%     36       36.00        4.81      253.56         290.74  aicmulsplat  HVX TCM (float16)
+c6         45       0.00%         N/A         N/A      1        0.50       90.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c6         20       0.00%        1029       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c6         13       0.00%         679       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c6          6       0.00%         326       0.00%      1        0.12       48.00     2608.00           0.00  splat  HVX TCM (index32)
+
+c6 total:         1258327 ucycles        67625937 pcycles (thread max)
+c6    t0 HVX              1257838 ucycles [78843106024, 78844363862]        67600528 pcycles  45.82% utilization
+c6    t1 HVX              1257838 ucycles [78843106024, 78844363862]        67600538 pcycles  45.28% utilization
+c6    t2 HVX              1257838 ucycles [78843106024, 78844363862]        67600520 pcycles  46.33% utilization
+c6    t3 HVX              1257838 ucycles [78843106024, 78844363862]        67600530 pcycles  46.32% utilization
+c6    t4 HMX              1257838 ucycles [78843106024, 78844363862]        67600524 pcycles  11.37% utilization
+c6    t5 DMAIssue         1258327 ucycles [78843106024, 78844364351]        67625937 pcycles   6.11% utilization
+
+
+c06t0 batch ucycles:          1257838 [78843106024,78844363862]    pcycles:        67600528 
+c06t1 batch ucycles:          1257838 [78843106024,78844363862]    pcycles:        67600538 
+c06t2 batch ucycles:          1257838 [78843106024,78844363862]    pcycles:        67600520 
+c06t3 batch ucycles:          1257838 [78843106024,78844363862]    pcycles:        67600530 
+c06t4 batch ucycles:          1257838 [78843106024,78844363862]    pcycles:        67600524 
+c06t5 batch ucycles:          1258327 [78843106024,78844364351]    pcycles:        67625937 
+c6: Total inference pcycle is 67625944
+c6: Effective frequency is 1031.86MHz
+c06t0 activate ucycles:             22408
+c06t1 activate ucycles:             22315
+c06t2 activate ucycles:             22160
+c06t3 activate ucycles:             21992
+c06t4 activate ucycles:             21808
+c06t5 activate ucycles:              2102
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c7    1126403      85.52%         N/A         N/A   3097         N/A         N/A         N/A            N/A  sync HMX
+c7    1030627      78.25%         N/A         N/A   3025   359501.25        2.87         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c7     543141      41.24%    29426177      41.65%   3033   923904.00        0.59       31.85          30.74  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c7     464002      35.23%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c7     204485      15.52%         N/A         N/A    217         N/A         N/A         N/A            N/A  sync DMAIssue
+c7     162540      12.34%         N/A         N/A    144    73728.00        2.20         N/A            N/A  aiccopyddr DMAIssue DDR 
+c7     125306       9.51%     6678782       9.45%   3105   218934.00        0.57       30.51          35.66  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c7      56145       4.26%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c7      36524       2.77%         N/A         N/A   3090         N/A         N/A         N/A            N/A  barrier HMX
+c7      23571       1.79%     1267141       1.79%    119        0.93    25353.68  1362975.19      502962.28  aicmmap DMAIssue CacheableDDR (index32)
+c7      17115       1.30%         N/A         N/A    398     3488.60        4.91         N/A            N/A  aicmulticastvtcm HVX TCM 
+c7      13089       0.99%         N/A         N/A    249       33.53      390.35         N/A            N/A  aiccopysamevtcm HVX TCM 
+c7      10027       0.76%      536364       0.76%    119        0.93    10785.34   576929.34      316539.48  aicmunmap DMAIssue CacheableDDR (index32)
+c7       6758       0.51%      364913       0.52%    288     3465.00        1.95      105.31         949.08  elementmul  HVX TCM (float16)
+c7       6048       0.46%         N/A         N/A    108     2322.00        2.60         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c7       5882       0.45%      321039       0.45%    108     1728.00        3.40      185.79         206.45  sigmoid  HVX TCM (float16)
+c7       5604       0.43%      301241       0.43%    108     9216.28        0.61       32.69      194578.24  inserttensor HVX TCM 
+c7       3249       0.25%         N/A         N/A     72       36.00       90.25         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c7       3218       0.24%         N/A         N/A     36     1152.00        2.79         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c7       2920       0.22%         N/A         N/A     72       18.00      162.22         N/A            N/A  aicscatternd HVX DDR (float16, index32)
+c7       2496       0.19%      135004       0.19%    109       41.00       60.88     3292.78        2334.86  aicnormalizationpost HVX TCM (float16, float)
+c7       2117       0.16%      113492       0.16%     72     1728.00        1.23       65.68          44.07  aicconvertweightstod32 HVX TCM (float16)
+c7       2018       0.15%      109091       0.15%    145     2896.00        0.70       37.67          48.84  aicconverttod32 HVX TCM (float16, i8)
+c7       1974       0.15%      105529       0.15%     36       36.00       54.83     2931.36        1636.96  aicsoftmax HVX TCM (float16, i8, index32)
+c7       1947       0.15%      103887       0.15%    144       36.00       54.08     2885.75        9656.24  batchedadd HVX TCM (float16)
+c7       1942       0.15%      102975       0.15%    362      135.56       14.33      759.61        1808.49  aicconvertfromd32 HVX TCM (float16)
+c7       1895       0.14%         N/A         N/A     38       18.56      102.09         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c7       1368       0.10%       73543       0.10%    109        0.85     1606.46    86362.42      148611.75  aicnormalizationpre HVX TCM (float, float16)
+c7       1355       0.10%       71700       0.10%    142       72.00       18.82      995.83        3155.26  convertto HVX TCM (float, float16)
+c7       1145       0.09%       61226       0.09%    142       36.00       31.81     1700.72        5399.74  convertto HVX TCM (float16, float)
+c7        933       0.07%       49966       0.07%     36     1152.00        0.81       43.37          35.82  aicselectsplatrange HVX TCM (float16, index32)
+c7        813       0.06%       43653       0.06%     72       36.00       22.58     1212.58        1240.48  aicbroadcastmul HVX TCM (float16)
+c7        570       0.04%         N/A         N/A      2        0.01    72960.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c7        510       0.04%       27404       0.04%     36       18.00       28.33     1522.44         933.58  aicnormalization HVX TCM (float16)
+c7        455       0.03%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c7        391       0.03%       21112       0.03%     72       22.50       17.38      938.31        1270.80  elementadd  HVX TCM (float16)
+c7        351       0.03%         N/A         N/A      2        0.01    44928.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c7        344       0.03%         N/A         N/A      6        1.25      275.20         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c7        273       0.02%         N/A         N/A      1        0.50      546.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c7        269       0.02%       14406       0.02%     72       11.25       23.91     1280.53        1825.89  elementneg  HVX TCM (float16)
+c7        228       0.02%       12169       0.02%     36       36.00        6.33      338.03         542.24  aicmulsplat  HVX TCM (float16)
+c7        109       0.01%        5489       0.01%      1    59580.55        0.00        0.09           0.00  aicendcyclestats HVX DDR (i8)
+c7        108       0.01%        5434       0.01%      1    59580.55        0.00        0.09           0.00  aicendcyclestats DMAIssue DDR (i8)
+c7        105       0.01%        5292       0.01%      1    59580.55        0.00        0.09           0.00  aicendcyclestats HMX DDR (i8)
+c7         25       0.00%        1211       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c7         23       0.00%         N/A         N/A      1        0.50       46.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c7         11       0.00%         575       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c7          8       0.00%         447       0.00%      1        0.12       64.00     3576.00           0.00  splat  HVX TCM (index32)
+
+c7 total:         1317137 ucycles        70649103 pcycles (thread max)
+c7    t0 HVX              1317100 ucycles [78843106004, 78844423104]        70647248 pcycles  43.70% utilization
+c7    t1 HVX              1317100 ucycles [78843106004, 78844423104]        70647274 pcycles  43.27% utilization
+c7    t2 HVX              1317100 ucycles [78843106004, 78844423104]        70647267 pcycles  44.30% utilization
+c7    t3 HVX              1317101 ucycles [78843106004, 78844423105]        70647266 pcycles  44.29% utilization
+c7    t4 HMX              1317100 ucycles [78843106004, 78844423104]        70647250 pcycles   9.46% utilization
+c7    t5 DMAIssue         1317137 ucycles [78843106004, 78844423141]        70649103 pcycles   5.49% utilization
+
+
+c07t0 batch ucycles:          1317100 [78843106004,78844423104]    pcycles:        70647248 
+c07t1 batch ucycles:          1317100 [78843106004,78844423104]    pcycles:        70647274 
+c07t2 batch ucycles:          1317100 [78843106004,78844423104]    pcycles:        70647267 
+c07t3 batch ucycles:          1317101 [78843106004,78844423105]    pcycles:        70647266 
+c07t4 batch ucycles:          1317100 [78843106004,78844423104]    pcycles:        70647250 
+c07t5 batch ucycles:          1317137 [78843106004,78844423141]    pcycles:        70649103 
+c7: Total inference pcycle is 70649121
+c7: Effective frequency is 1029.86MHz
+c07t0 activate ucycles:             20632
+c07t1 activate ucycles:             20529
+c07t2 activate ucycles:             20352
+c07t3 activate ucycles:             20147
+c07t4 activate ucycles:             19971
+c07t5 activate ucycles:              2106
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c8    1059918      83.86%         N/A         N/A   3104         N/A         N/A         N/A            N/A  sync HMX
+c8     928263      73.45%         N/A         N/A   3027   359501.12        2.58         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c8     544307      43.07%    29379511      43.35%   3033   923904.00        0.59       31.80          29.82  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c8     487653      38.58%         N/A         N/A   5160         N/A         N/A         N/A            N/A  sync HVX
+c8     189719      15.01%         N/A         N/A    215         N/A         N/A         N/A            N/A  sync DMAIssue
+c8     150745      11.93%     7938013      11.71%   3105   218934.00        0.69       36.26          38.28  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c8      56530       4.47%         N/A         N/A   5160         N/A         N/A         N/A            N/A  barrier HVX
+c8      25073       1.98%         N/A         N/A   3081         N/A         N/A         N/A            N/A  barrier HMX
+c8      23080       1.83%         N/A         N/A    398     4638.35        4.98         N/A            N/A  aicmulticastvtcm HVX TCM 
+c8      22785       1.80%     1225414       1.81%    119        0.93    24508.24  1318092.37      512355.70  aicmmap DMAIssue CacheableDDR (index32)
+c8      16056       1.27%         N/A         N/A    213       31.28      513.28         N/A            N/A  aiccopysamevtcm HVX TCM 
+c8      12027       0.95%         N/A         N/A     72     2304.00        5.22         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c8       9982       0.79%      534899       0.79%    119        0.93    10736.94   575353.55      263108.99  aicmunmap DMAIssue CacheableDDR (index32)
+c8       6813       0.54%      366830       0.54%    288     3465.00        1.97      105.87        3825.30  elementmul  HVX TCM (float16)
+c8       5953       0.47%         N/A         N/A    108     2322.00        2.56         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c8       5216       0.41%      280106       0.41%    108     9216.28        0.57       30.39      140964.88  inserttensor HVX TCM 
+c8       4401       0.35%      239737       0.35%    108     1728.00        2.55      138.74         134.95  sigmoid  HVX TCM (float16)
+c8       3893       0.31%         N/A         N/A     36     1152.00        3.38         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c8       3357       0.27%         N/A         N/A     38       18.56      180.85         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c8       3339       0.26%      177874       0.26%    362      135.56       24.63     1312.12        6238.30  aicconvertfromd32 HVX TCM (float16)
+c8       3192       0.25%      171732       0.25%    109       41.00       77.85     4188.59        5966.37  aicnormalizationpost HVX TCM (float16, float)
+c8       2538       0.20%         N/A         N/A      8        1.12     2256.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c8       2329       0.18%         N/A         N/A     72       36.00       64.69         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c8       2273       0.18%      123107       0.18%    109        0.85     2669.21   144566.02      177695.84  aicnormalizationpre HVX TCM (float, float16)
+c8       2104       0.17%      113069       0.17%     72     1728.00        1.22       65.43          42.66  aicconvertweightstod32 HVX TCM (float16)
+c8       1865       0.15%       99744       0.15%    145     2896.00        0.64       34.44          40.45  aicconverttod32 HVX TCM (float16, i8)
+c8       1453       0.11%       78431       0.12%    144       36.00       40.36     2178.64        6986.03  batchedadd HVX TCM (float16)
+c8       1403       0.11%       75451       0.11%     36       36.00       38.97     2095.86         981.92  aicsoftmax HVX TCM (float16, i8, index32)
+c8       1091       0.09%       57853       0.09%    142       72.00       15.15      803.51        2166.02  convertto HVX TCM (float, float16)
+c8        996       0.08%       53304       0.08%    142       36.00       27.67     1480.67        5261.99  convertto HVX TCM (float16, float)
+c8        888       0.07%       47624       0.07%     36     1152.00        0.77       41.34          33.41  aicselectsplatrange HVX TCM (float16, index32)
+c8        700       0.06%         N/A         N/A      2        0.01    89600.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c8        581       0.05%       31194       0.05%     72       36.00       16.14      866.50         689.86  aicbroadcastmul HVX TCM (float16)
+c8        525       0.04%       28109       0.04%     36       18.00       29.17     1561.61        1005.56  aicnormalization HVX TCM (float16)
+c8        446       0.04%       24302       0.04%     72       11.25       39.64     2160.18       11745.81  elementneg  HVX TCM (float16)
+c8        432       0.03%       22963       0.03%     72       22.50       19.20     1020.58        4662.85  elementadd  HVX TCM (float16)
+c8        403       0.03%         N/A         N/A    236         N/A         N/A         N/A            N/A  barrier DMAIssue
+c8        400       0.03%         N/A         N/A      2        0.01    51200.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c8        358       0.03%       19112       0.03%     36     1152.00        0.31       16.59           3.94  aicconverttod32 HVX TCM (float16, i8, bool)
+c8        327       0.03%         N/A         N/A      1        0.50      654.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c8        229       0.02%       11894       0.02%      1    59580.55        0.00        0.20           0.00  aicendcyclestats HMX DDR (i8)
+c8        196       0.02%       10179       0.02%      1    59580.55        0.00        0.17           0.00  aicendcyclestats HVX DDR (i8)
+c8        170       0.01%        8963       0.01%     36       36.00        4.72      248.97         289.26  aicmulsplat  HVX TCM (float16)
+c8        137       0.01%        7098       0.01%      1    59580.55        0.00        0.12           0.00  aicendcyclestats DMAIssue DDR (i8)
+c8         41       0.00%         N/A         N/A      1        0.50       82.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c8         34       0.00%        1794       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c8         12       0.00%         638       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c8          7       0.00%         357       0.00%      1        0.12       56.00     2856.00           0.00  splat  HVX TCM (index32)
+
+c8 total:         1263865 ucycles        67773744 pcycles (thread max)
+c8    t0 HVX              1263477 ucycles [78843106025, 78844369502]        67753595 pcycles  45.41% utilization
+c8    t1 HVX              1263477 ucycles [78843106025, 78844369502]        67753588 pcycles  44.91% utilization
+c8    t2 HVX              1263478 ucycles [78843106025, 78844369503]        67753593 pcycles  45.95% utilization
+c8    t3 HVX              1263478 ucycles [78843106025, 78844369503]        67753599 pcycles  45.97% utilization
+c8    t4 HMX              1263477 ucycles [78843106025, 78844369502]        67753593 pcycles  11.74% utilization
+c8    t5 DMAIssue         1263865 ucycles [78843106025, 78844369890]        67773744 pcycles   6.14% utilization
+
+
+c08t0 batch ucycles:          1263477 [78843106025,78844369502]    pcycles:        67753595 
+c08t1 batch ucycles:          1263477 [78843106025,78844369502]    pcycles:        67753588 
+c08t2 batch ucycles:          1263478 [78843106025,78844369503]    pcycles:        67753593 
+c08t3 batch ucycles:          1263478 [78843106025,78844369503]    pcycles:        67753599 
+c08t4 batch ucycles:          1263477 [78843106025,78844369502]    pcycles:        67753593 
+c08t5 batch ucycles:          1263865 [78843106025,78844369890]    pcycles:        67773744 
+c8: Total inference pcycle is 67773744
+c8: Effective frequency is 1029.58MHz
+c08t0 activate ucycles:             19998
+c08t1 activate ucycles:             19897
+c08t2 activate ucycles:             19746
+c08t3 activate ucycles:             19573
+c08t4 activate ucycles:             19385
+c08t5 activate ucycles:              2091
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c9    1059304      83.80%         N/A         N/A   3098         N/A         N/A         N/A            N/A  sync HMX
+c9     923754      73.08%         N/A         N/A   3027   359501.12        2.57         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c9     544554      43.08%    29433774      43.40%   3033   923904.00        0.59       31.86          29.81  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c9     485183      38.38%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c9     188893      14.94%         N/A         N/A    222         N/A         N/A         N/A            N/A  sync DMAIssue
+c9     138179      10.93%     7304084      10.77%   3105   218934.00        0.63       33.36          34.37  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c9      56434       4.46%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c9      36902       2.92%         N/A         N/A   3089         N/A         N/A         N/A            N/A  barrier HMX
+c9      22492       1.78%     1210672       1.78%    119        0.93    24193.08  1302235.43      455937.49  aicmmap DMAIssue CacheableDDR (index32)
+c9      22405       1.77%         N/A         N/A    398     3488.60        6.42         N/A            N/A  aicmulticastvtcm HVX TCM 
+c9      12990       1.03%         N/A         N/A    249       33.53      387.40         N/A            N/A  aiccopysamevtcm HVX TCM 
+c9      10360       0.82%      555902       0.82%    119        0.93    11143.53   597945.01      493154.50  aicmunmap DMAIssue CacheableDDR (index32)
+c9       6424       0.51%      346230       0.51%    288     3465.00        1.85       99.92        4497.75  elementmul  HVX TCM (float16)
+c9       5734       0.45%      307461       0.45%    108     9216.28        0.62       33.36      215273.36  inserttensor HVX TCM 
+c9       5127       0.41%         N/A         N/A    108     2322.00        2.21         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c9       4610       0.36%      252352       0.37%    108     1728.00        2.67      146.04         156.19  sigmoid  HVX TCM (float16)
+c9       4001       0.32%         N/A         N/A     38       18.56      215.54         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c9       3191       0.25%      170657       0.25%    109       41.00       77.83     4162.37        6230.98  aicnormalizationpost HVX TCM (float16, float)
+c9       3163       0.25%         N/A         N/A     36     1152.00        2.75         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c9       2468       0.20%      131360       0.19%    362      135.56       18.21      969.00        3503.04  aicconvertfromd32 HVX TCM (float16)
+c9       2332       0.18%         N/A         N/A     72       36.00       64.78         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c9       2329       0.18%      126175       0.19%    109        0.85     2734.97   148168.81      191224.52  aicnormalizationpre HVX TCM (float, float16)
+c9       2187       0.17%         N/A         N/A      8        1.12     1944.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c9       2179       0.17%      117197       0.17%     72     1728.00        1.26       67.82          39.75  aicconvertweightstod32 HVX TCM (float16)
+c9       1893       0.15%      101212       0.15%    145     2896.00        0.65       34.95          43.50  aicconverttod32 HVX TCM (float16, i8)
+c9       1842       0.15%       98633       0.15%    144       36.00       51.17     2739.81        6483.09  batchedadd HVX TCM (float16)
+c9       1591       0.13%       85160       0.13%     36       36.00       44.19     2365.56        1164.83  aicsoftmax HVX TCM (float16, i8, index32)
+c9       1256       0.10%       67091       0.10%    142       36.00       34.89     1863.64        4583.45  convertto HVX TCM (float16, float)
+c9       1219       0.10%       65544       0.10%    142       72.00       16.93      910.33        2323.87  convertto HVX TCM (float, float16)
+c9        857       0.07%       45746       0.07%     36     1152.00        0.74       39.71          29.44  aicselectsplatrange HVX TCM (float16, index32)
+c9        578       0.05%       30887       0.05%     72       36.00       16.06      857.97         664.56  aicbroadcastmul HVX TCM (float16)
+c9        525       0.04%         N/A         N/A      2        0.01    67200.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c9        463       0.04%       24984       0.04%     72       11.25       41.16     2220.80       11757.75  elementneg  HVX TCM (float16)
+c9        455       0.04%       24552       0.04%     36       18.00       25.28     1364.00         824.10  aicnormalization HVX TCM (float16)
+c9        446       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c9        371       0.03%       20026       0.03%     72       22.50       16.49      890.04        4078.68  elementadd  HVX TCM (float16)
+c9        357       0.03%         N/A         N/A      2        0.01    45696.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c9        288       0.02%         N/A         N/A      1        0.50      576.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c9        264       0.02%       13747       0.02%      1    59580.55        0.00        0.23           0.00  aicendcyclestats HVX DDR (i8)
+c9        196       0.02%       10164       0.01%      1    59580.55        0.00        0.17           0.00  aicendcyclestats HMX DDR (i8)
+c9        166       0.01%        8616       0.01%     36       36.00        4.61      239.33         246.91  aicmulsplat  HVX TCM (float16)
+c9        114       0.01%        5928       0.01%      1    59580.55        0.00        0.10           0.00  aicendcyclestats DMAIssue DDR (i8)
+c9         40       0.00%         N/A         N/A      1        0.50       80.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c9         29       0.00%        1541       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c9         11       0.00%         566       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c9          6       0.00%         346       0.00%      1        0.12       48.00     2768.00           0.00  splat  HVX TCM (index32)
+
+c9 total:         1264095 ucycles        67825383 pcycles (thread max)
+c9    t0 HVX              1263298 ucycles [78843106026, 78844369324]        67783907 pcycles  45.54% utilization
+c9    t1 HVX              1263298 ucycles [78843106026, 78844369324]        67783914 pcycles  46.48% utilization
+c9    t2 HVX              1263298 ucycles [78843106026, 78844369324]        67783914 pcycles  44.73% utilization
+c9    t3 HVX              1263298 ucycles [78843106026, 78844369324]        67783909 pcycles  46.11% utilization
+c9    t4 HMX              1263298 ucycles [78843106026, 78844369324]        67783914 pcycles  10.79% utilization
+c9    t5 DMAIssue         1264095 ucycles [78843106026, 78844370121]        67825383 pcycles   5.83% utilization
+
+
+c09t0 batch ucycles:          1263298 [78843106026,78844369324]    pcycles:        67783907 
+c09t1 batch ucycles:          1263298 [78843106026,78844369324]    pcycles:        67783914 
+c09t2 batch ucycles:          1263298 [78843106026,78844369324]    pcycles:        67783914 
+c09t3 batch ucycles:          1263298 [78843106026,78844369324]    pcycles:        67783909 
+c09t4 batch ucycles:          1263298 [78843106026,78844369324]    pcycles:        67783914 
+c09t5 batch ucycles:          1264095 [78843106026,78844370121]    pcycles:        67825383 
+c9: Total inference pcycle is 67825390
+c9: Effective frequency is 1030.18MHz
+c09t0 activate ucycles:             21849
+c09t1 activate ucycles:             21754
+c09t2 activate ucycles:             21607
+c09t3 activate ucycles:             21428
+c09t4 activate ucycles:             21258
+c09t5 activate ucycles:              2081
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c10   1049997      82.58%         N/A         N/A   3103         N/A         N/A         N/A            N/A  sync HMX
+c10   1034740      81.38%         N/A         N/A   3025   359501.25        2.88         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c10    545624      42.91%         N/A         N/A   5160         N/A         N/A         N/A            N/A  sync HVX
+c10    542927      42.70%    29403857      43.06%   3033   923904.00        0.59       31.83          30.58  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c10    199985      15.73%         N/A         N/A    217         N/A         N/A         N/A            N/A  sync DMAIssue
+c10    162650      12.79%     8669195      12.70%   3105   218934.00        0.74       39.60          37.22  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c10     56033       4.41%         N/A         N/A   5160         N/A         N/A         N/A            N/A  barrier HVX
+c10     27678       2.18%         N/A         N/A   3085         N/A         N/A         N/A            N/A  barrier HMX
+c10     24842       1.95%         N/A         N/A    398     4638.35        5.36         N/A            N/A  aicmulticastvtcm HVX TCM 
+c10     21712       1.71%     1168177       1.71%    119        0.93    23354.08  1256526.52      423551.07  aicmmap DMAIssue CacheableDDR (index32)
+c10     20437       1.61%         N/A         N/A    213       31.28      653.33         N/A            N/A  aiccopysamevtcm HVX TCM 
+c10     14619       1.15%         N/A         N/A     72     2304.00        6.35         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c10     10021       0.79%      536766       0.79%    119        0.93    10778.89   577361.75      252791.32  aicmunmap DMAIssue CacheableDDR (index32)
+c10      7308       0.57%      394401       0.58%    288     3465.00        2.11      113.82        4761.60  elementmul  HVX TCM (float16)
+c10      6832       0.54%         N/A         N/A    108     2322.00        2.94         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c10      6010       0.47%      326290       0.48%    108     1728.00        3.48      188.83         212.18  sigmoid  HVX TCM (float16)
+c10      5362       0.42%      288441       0.42%    108     9216.28        0.58       31.30       44625.81  inserttensor HVX TCM 
+c10      4805       0.38%         N/A         N/A     36     1152.00        4.17         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c10      4277       0.34%      229676       0.34%    109       41.00      104.32     5601.85       15495.72  aicnormalizationpost HVX TCM (float16, float)
+c10      4139       0.33%      222191       0.33%    362      135.56       30.53     1639.03       11867.07  aicconvertfromd32 HVX TCM (float16)
+c10      3439       0.27%         N/A         N/A     38       18.56      185.27         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c10      3089       0.24%      167268       0.24%    109        0.85     3627.45   196424.81      250263.66  aicnormalizationpre HVX TCM (float, float16)
+c10      2394       0.19%         N/A         N/A     72       36.00       66.50         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c10      2348       0.18%      126427       0.19%     72     1728.00        1.36       73.16          43.00  aicconvertweightstod32 HVX TCM (float16)
+c10      2303       0.18%      124588       0.18%    145     2896.00        0.80       43.02          66.60  aicconverttod32 HVX TCM (float16, i8)
+c10      1786       0.14%       96287       0.14%    144       36.00       49.61     2674.64        6168.19  batchedadd HVX TCM (float16)
+c10      1694       0.13%       90775       0.13%     36       36.00       47.06     2521.53        1780.73  aicsoftmax HVX TCM (float16, i8, index32)
+c10      1100       0.09%       59020       0.09%     36     1152.00        0.95       51.23          40.48  aicselectsplatrange HVX TCM (float16, index32)
+c10      1059       0.08%       56626       0.08%    142       72.00       14.71      786.47        3407.89  convertto HVX TCM (float, float16)
+c10       998       0.08%       53444       0.08%    142       36.00       27.72     1484.56        5720.83  convertto HVX TCM (float16, float)
+c10       912       0.07%         N/A         N/A      6        1.25      729.60         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c10       576       0.05%       31045       0.05%     72       36.00       16.00      862.36         855.84  aicbroadcastmul HVX TCM (float16)
+c10       559       0.04%       29385       0.04%     72       22.50       24.84     1306.00        7825.52  elementadd  HVX TCM (float16)
+c10       559       0.04%         N/A         N/A      2        0.01    71552.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c10       442       0.03%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c10       433       0.03%       23273       0.03%     36       18.00       24.06     1292.94         764.94  aicnormalization HVX TCM (float16)
+c10       429       0.03%       22955       0.03%     72       11.25       38.13     2040.44        8823.42  elementneg  HVX TCM (float16)
+c10       366       0.03%       19484       0.03%     36     1152.00        0.32       16.91           3.77  aicconverttod32 HVX TCM (float16, i8, bool)
+c10       329       0.03%         N/A         N/A      2        0.01    42112.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c10       260       0.02%         N/A         N/A      1        0.50      520.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c10       207       0.02%       10734       0.02%      1    59580.55        0.00        0.18           0.00  aicendcyclestats HMX DDR (i8)
+c10       184       0.01%        9564       0.01%      1    59580.55        0.00        0.16           0.00  aicendcyclestats HVX DDR (i8)
+c10       128       0.01%        6757       0.01%     36       36.00        3.56      187.69         176.75  aicmulsplat  HVX TCM (float16)
+c10        60       0.00%        3083       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c10        46       0.00%        2421       0.00%      1    59580.55        0.00        0.04           0.00  aicendcyclestats DMAIssue DDR (i8)
+c10        23       0.00%         N/A         N/A      1        0.50       46.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c10        16       0.00%         847       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c10         7       0.00%         371       0.00%      1        0.12       56.00     2968.00           0.00  splat  HVX TCM (index32)
+
+c10 total:         1271557 ucycles        68278531 pcycles (thread max)
+c10    t0 HVX              1271289 ucycles [78843106022, 78844377311]        68264631 pcycles  45.64% utilization
+c10    t1 HVX              1271289 ucycles [78843106022, 78844377311]        68264622 pcycles  45.04% utilization
+c10    t2 HVX              1271289 ucycles [78843106022, 78844377311]        68264630 pcycles  46.08% utilization
+c10    t3 HVX              1271289 ucycles [78843106022, 78844377311]        68264635 pcycles  46.09% utilization
+c10    t4 HMX              1271293 ucycles [78843106022, 78844377315]        68264796 pcycles  12.72% utilization
+c10    t5 DMAIssue         1271557 ucycles [78843106022, 78844377579]        68278531 pcycles   6.50% utilization
+
+
+c10t0 batch ucycles:          1271289 [78843106022,78844377311]    pcycles:        68264631 
+c10t1 batch ucycles:          1271289 [78843106022,78844377311]    pcycles:        68264622 
+c10t2 batch ucycles:          1271289 [78843106022,78844377311]    pcycles:        68264630 
+c10t3 batch ucycles:          1271289 [78843106022,78844377311]    pcycles:        68264635 
+c10t4 batch ucycles:          1271293 [78843106022,78844377315]    pcycles:        68264796 
+c10t5 batch ucycles:          1271557 [78843106022,78844377579]    pcycles:        68278531 
+c10: Total inference pcycle is 68278537
+c10: Effective frequency is 1030.98MHz
+c10t0 activate ucycles:             21805
+c10t1 activate ucycles:             21708
+c10t2 activate ucycles:             21555
+c10t3 activate ucycles:             21382
+c10t4 activate ucycles:             21197
+c10t5 activate ucycles:              2104
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c11   1046795      82.31%         N/A         N/A   3103         N/A         N/A         N/A            N/A  sync HMX
+c11   1032310      81.17%         N/A         N/A   3024   359501.12        2.87         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c11    546730      42.99%    29510709      43.28%   3033   923904.00        0.59       31.94          30.42  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c11    514527      40.46%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c11    199492      15.69%         N/A         N/A    214         N/A         N/A         N/A            N/A  sync DMAIssue
+c11    153853      12.10%     8120481      11.91%   3105   218934.00        0.70       37.09          35.01  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c11     56672       4.46%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c11     39638       3.12%         N/A         N/A   3087         N/A         N/A         N/A            N/A  barrier HMX
+c11     28288       2.22%         N/A         N/A    398     3488.60        8.11         N/A            N/A  aicmulticastvtcm HVX TCM 
+c11     22578       1.78%     1214908       1.78%    119        0.93    24285.58  1306791.80      446769.98  aicmmap DMAIssue CacheableDDR (index32)
+c11     15881       1.25%         N/A         N/A    249       33.53      473.62         N/A            N/A  aiccopysamevtcm HVX TCM 
+c11     11527       0.91%      614903       0.90%    119        0.93    12398.79   661408.27      920525.44  aicmunmap DMAIssue CacheableDDR (index32)
+c11      7406       0.58%      400212       0.59%    288     3465.00        2.14      115.50        5930.94  elementmul  HVX TCM (float16)
+c11      5782       0.45%      317003       0.46%    108     1728.00        3.35      183.45         177.65  sigmoid  HVX TCM (float16)
+c11      5441       0.43%      293588       0.43%    108     9216.28        0.59       31.86      170435.70  inserttensor HVX TCM 
+c11      4699       0.37%         N/A         N/A    108     2322.00        2.02         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c11      4087       0.32%         N/A         N/A     36     1152.00        3.55         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c11      3708       0.29%      200127       0.29%    109       41.00       90.44     4881.15        8468.61  aicnormalizationpost HVX TCM (float16, float)
+c11      3398       0.27%         N/A         N/A     38       18.56      183.06         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c11      2812       0.22%      149272       0.22%    362      135.56       20.74     1101.13        3428.14  aicconvertfromd32 HVX TCM (float16)
+c11      2530       0.20%      136779       0.20%    109        0.85     2971.01   160621.21      193653.24  aicnormalizationpre HVX TCM (float, float16)
+c11      2344       0.18%         N/A         N/A     72       36.00       65.11         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c11      2324       0.18%      124054       0.18%     72     1728.00        1.34       71.79          40.90  aicconvertweightstod32 HVX TCM (float16)
+c11      2217       0.17%      118521       0.17%    145     2896.00        0.77       40.93          63.95  aicconverttod32 HVX TCM (float16, i8)
+c11      2091       0.16%      112490       0.16%    144       36.00       58.08     3124.72        6534.50  batchedadd HVX TCM (float16)
+c11      1849       0.15%       99541       0.15%     36       36.00       51.36     2765.03        1636.70  aicsoftmax HVX TCM (float16, i8, index32)
+c11      1779       0.14%       95315       0.14%    142       36.00       49.42     2647.64        8899.60  convertto HVX TCM (float16, float)
+c11      1269       0.10%       67566       0.10%    142       72.00       17.62      938.42        3039.68  convertto HVX TCM (float, float16)
+c11       973       0.08%       52274       0.08%     36     1152.00        0.84       45.38          42.06  aicselectsplatrange HVX TCM (float16, index32)
+c11       691       0.05%         N/A         N/A      2        0.01    88448.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c11       656       0.05%         N/A         N/A      5        1.12      583.11         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c11       539       0.04%       28890       0.04%     72       22.50       23.96     1284.00        6870.54  elementadd  HVX TCM (float16)
+c11       515       0.04%       27768       0.04%     72       36.00       14.31      771.33         700.09  aicbroadcastmul HVX TCM (float16)
+c11       509       0.04%       27439       0.04%     36       18.00       28.28     1524.39        1060.63  aicnormalization HVX TCM (float16)
+c11       450       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c11       398       0.03%       20831       0.03%     72       11.25       35.38     1851.64        7993.52  elementneg  HVX TCM (float16)
+c11       382       0.03%         N/A         N/A      2        0.01    48896.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c11       309       0.02%         N/A         N/A      1        0.50      618.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c11       193       0.02%       10053       0.01%      1    59580.55        0.00        0.17           0.00  aicendcyclestats HVX DDR (i8)
+c11       176       0.01%        9182       0.01%      1    59580.55        0.00        0.15           0.00  aicendcyclestats HMX DDR (i8)
+c11       170       0.01%        8914       0.01%     36       36.00        4.72      247.61         231.99  aicmulsplat  HVX TCM (float16)
+c11        71       0.01%        3714       0.01%      1    59580.55        0.00        0.06           0.00  aicendcyclestats DMAIssue DDR (i8)
+c11        61       0.00%        3165       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c11        24       0.00%         N/A         N/A      1        0.50       48.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c11        11       0.00%         608       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c11         7       0.00%         354       0.00%      1        0.12       56.00     2832.00           0.00  splat  HVX TCM (index32)
+
+c11 total:         1271724 ucycles        68188383 pcycles (thread max)
+c11    t0 HVX              1271267 ucycles [78843106024, 78844377291]        68164633 pcycles  45.79% utilization
+c11    t1 HVX              1271267 ucycles [78843106024, 78844377291]        68164636 pcycles  45.35% utilization
+c11    t2 HVX              1271267 ucycles [78843106024, 78844377291]        68164629 pcycles  46.45% utilization
+c11    t3 HVX              1271268 ucycles [78843106024, 78844377292]        68164633 pcycles  46.45% utilization
+c11    t4 HMX              1271267 ucycles [78843106024, 78844377291]        68164639 pcycles  11.93% utilization
+c11    t5 DMAIssue         1271724 ucycles [78843106023, 78844377747]        68188383 pcycles   6.57% utilization
+
+
+c11t0 batch ucycles:          1271267 [78843106024,78844377291]    pcycles:        68164633 
+c11t1 batch ucycles:          1271267 [78843106024,78844377291]    pcycles:        68164636 
+c11t2 batch ucycles:          1271267 [78843106024,78844377291]    pcycles:        68164629 
+c11t3 batch ucycles:          1271268 [78843106024,78844377292]    pcycles:        68164633 
+c11t4 batch ucycles:          1271267 [78843106024,78844377291]    pcycles:        68164639 
+c11t5 batch ucycles:          1271724 [78843106023,78844377747]    pcycles:        68188383 
+c11: Total inference pcycle is 68188383
+c11: Effective frequency is 1029.48MHz
+c11t0 activate ucycles:             21695
+c11t1 activate ucycles:             21593
+c11t2 activate ucycles:             21442
+c11t3 activate ucycles:             21272
+c11t4 activate ucycles:             21085
+c11t5 activate ucycles:              2099
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c12   1098683      85.99%         N/A         N/A   3026   359401.00        3.06         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c12   1042707      81.61%         N/A         N/A   3097         N/A         N/A         N/A            N/A  sync HMX
+c12    551328      43.15%         N/A         N/A   5158         N/A         N/A         N/A            N/A  sync HVX
+c12    545586      42.70%    29490444      43.03%   3032   923648.00        0.59       31.93          31.86  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c12    214111      16.76%         N/A         N/A    227         N/A         N/A         N/A            N/A  sync DMAIssue
+c12    175115      13.71%     9299204      13.57%   3104   218864.00        0.80       42.49          39.01  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c12     56089       4.39%         N/A         N/A   5158         N/A         N/A         N/A            N/A  barrier HVX
+c12     32041       2.51%         N/A         N/A    398     4638.35        6.91         N/A            N/A  aicmulticastvtcm HVX TCM 
+c12     26794       2.10%         N/A         N/A   3083         N/A         N/A         N/A            N/A  barrier HMX
+c12     21303       1.67%     1141322       1.67%    119        0.93    22914.15  1227640.47      448418.15  aicmmap DMAIssue CacheableDDR (index32)
+c12     19824       1.55%         N/A         N/A    213       31.28      633.73         N/A            N/A  aiccopysamevtcm HVX TCM 
+c12     13156       1.03%         N/A         N/A     72     2304.00        5.71         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c12     10193       0.80%      527800       0.77%    119        0.93    10963.90   567717.65      264301.29  aicmunmap DMAIssue CacheableDDR (index32)
+c12      7521       0.59%      406167       0.59%    288     3465.00        2.17      117.22        5531.41  elementmul  HVX TCM (float16)
+c12      6329       0.50%         N/A         N/A    108     2322.00        2.73         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c12      5711       0.45%      309732       0.45%    108     1728.00        3.30      179.24         189.87  sigmoid  HVX TCM (float16)
+c12      5288       0.41%      283724       0.41%    108     9216.28        0.57       30.79       54496.34  inserttensor HVX TCM 
+c12      4498       0.35%         N/A         N/A     36     1152.00        3.90         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c12      4220       0.33%      226128       0.33%    109       41.00      102.93     5515.32        7400.11  aicnormalizationpost HVX TCM (float16, float)
+c12      3591       0.28%      190477       0.28%    361      135.50       26.50     1405.73        6094.08  aicconvertfromd32 HVX TCM (float16)
+c12      3146       0.25%         N/A         N/A     37       18.50      170.05         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c12      2433       0.19%         N/A         N/A      8        1.00     2433.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c12      2385       0.19%      128009       0.19%    145     2896.00        0.82       44.20          73.17  aicconverttod32 HVX TCM (float16, i8)
+c12      2383       0.19%         N/A         N/A     72       36.00       66.19         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c12      2295       0.18%      123736       0.18%    109        0.85     2695.05   145304.66      171541.79  aicnormalizationpre HVX TCM (float, float16)
+c12      2254       0.18%      120922       0.18%     72     1728.00        1.30       69.98          44.40  aicconvertweightstod32 HVX TCM (float16)
+c12      2134       0.17%      115557       0.17%    144       36.00       59.28     3209.92        8350.49  batchedadd HVX TCM (float16)
+c12      1707       0.13%       91555       0.13%     36       36.00       47.42     2543.19        1460.87  aicsoftmax HVX TCM (float16, i8, index32)
+c12      1379       0.11%       73646       0.11%    142       72.00       19.15     1022.86        4349.88  convertto HVX TCM (float, float16)
+c12      1228       0.10%       66506       0.10%    142       36.00       34.11     1847.39        5598.20  convertto HVX TCM (float16, float)
+c12      1039       0.08%       55462       0.08%     36     1152.00        0.90       48.14          41.38  aicselectsplatrange HVX TCM (float16, index32)
+c12       803       0.06%       42609       0.06%     72       11.25       71.38     3787.47       33737.51  elementneg  HVX TCM (float16)
+c12       724       0.06%         N/A         N/A      2        0.01    92672.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c12       547       0.04%       29214       0.04%     72       22.50       24.31     1298.40        6858.57  elementadd  HVX TCM (float16)
+c12       522       0.04%       27939       0.04%     72       36.00       14.50      776.08         518.68  aicbroadcastmul HVX TCM (float16)
+c12       468       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c12       444       0.03%       23793       0.03%     36       18.00       24.67     1321.83         877.50  aicnormalization HVX TCM (float16)
+c12       374       0.03%       19976       0.03%     36     1152.00        0.32       17.34           3.69  aicconverttod32 HVX TCM (float16, i8, bool)
+c12       349       0.03%         N/A         N/A      2        0.01    44672.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c12       260       0.02%         N/A         N/A      1        0.50      520.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c12       163       0.01%        8377       0.01%     36       36.00        4.53      232.69         226.72  aicmulsplat  HVX TCM (float16)
+c12        75       0.01%        3882       0.01%      1    59580.55        0.00        0.07           0.00  aicendcyclestats HVX DDR (i8)
+c12        71       0.01%        3737       0.01%      1    59580.55        0.00        0.06           0.00  aicendcyclestats HMX DDR (i8)
+c12        52       0.00%        2670       0.00%      1    59580.55        0.00        0.04           0.00  aicendcyclestats DMAIssue DDR (i8)
+c12        43       0.00%         N/A         N/A      1        0.50       86.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c12        25       0.00%        1296       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c12        20       0.00%        1036       0.00%      1    36864.01        0.00        0.03           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c12         7       0.00%         360       0.00%      1        0.12       56.00     2880.00           0.00  splat  HVX TCM (index32)
+
+c12 total:         1277743 ucycles        68540339 pcycles (thread max)
+c12    t0 HVX              1277475 ucycles [78843106020, 78844383495]        68526351 pcycles  45.66% utilization
+c12    t1 HVX              1277474 ucycles [78843106021, 78844383495]        68526324 pcycles  45.17% utilization
+c12    t2 HVX              1277475 ucycles [78843106020, 78844383495]        68526351 pcycles  46.19% utilization
+c12    t3 HVX              1277474 ucycles [78843106021, 78844383495]        68526357 pcycles  46.22% utilization
+c12    t4 HMX              1277476 ucycles [78843106021, 78844383497]        68526430 pcycles  13.58% utilization
+c12    t5 DMAIssue         1277743 ucycles [78843106021, 78844383764]        68540339 pcycles   6.61% utilization
+
+
+c12t0 batch ucycles:          1277475 [78843106020,78844383495]    pcycles:        68526351 
+c12t1 batch ucycles:          1277474 [78843106021,78844383495]    pcycles:        68526324 
+c12t2 batch ucycles:          1277475 [78843106020,78844383495]    pcycles:        68526351 
+c12t3 batch ucycles:          1277474 [78843106021,78844383495]    pcycles:        68526357 
+c12t4 batch ucycles:          1277476 [78843106021,78844383497]    pcycles:        68526430 
+c12t5 batch ucycles:          1277743 [78843106021,78844383764]    pcycles:        68540339 
+c12: Total inference pcycle is 68540348
+c12: Effective frequency is 1029.92MHz
+c12t0 activate ucycles:             21822
+c12t1 activate ucycles:             21726
+c12t2 activate ucycles:             21535
+c12t3 activate ucycles:             21402
+c12t4 activate ucycles:             21215
+c12t5 activate ucycles:              2096
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c13   1098076      85.95%         N/A         N/A   3026   359401.00        3.06         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c13   1038310      81.27%         N/A         N/A   3099         N/A         N/A         N/A            N/A  sync HMX
+c13    544376      42.61%    29419469      42.93%   3032   923648.00        0.59       31.85          31.08  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c13    535313      41.90%         N/A         N/A   5122         N/A         N/A         N/A            N/A  sync HVX
+c13    216451      16.94%         N/A         N/A    218         N/A         N/A         N/A            N/A  sync DMAIssue
+c13    165615      12.96%     8780412      12.81%   3104   218864.00        0.76       40.12          35.69  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c13     57243       4.48%         N/A         N/A   5122         N/A         N/A         N/A            N/A  barrier HVX
+c13     39860       3.12%         N/A         N/A   3090         N/A         N/A         N/A            N/A  barrier HMX
+c13     28813       2.26%         N/A         N/A    398     3488.60        8.26         N/A            N/A  aicmulticastvtcm HVX TCM 
+c13     21825       1.71%     1168172       1.70%    119        0.93    23475.63  1256521.14      434808.39  aicmmap DMAIssue CacheableDDR (index32)
+c13     17087       1.34%         N/A         N/A    249       33.53      509.58         N/A            N/A  aiccopysamevtcm HVX TCM 
+c13     10345       0.81%      548154       0.80%    119        0.93    11127.39   589611.03      284326.50  aicmunmap DMAIssue CacheableDDR (index32)
+c13      7390       0.58%      405844       0.59%    288     3465.00        2.13      117.13        5627.49  elementmul  HVX TCM (float16)
+c13      5503       0.43%      295419       0.43%    108     9216.28        0.60       32.05      205091.01  inserttensor HVX TCM 
+c13      5350       0.42%      291458       0.43%    108     1728.00        3.10      168.67         169.96  sigmoid  HVX TCM (float16)
+c13      5009       0.39%         N/A         N/A    108     2322.00        2.16         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c13      3817       0.30%      204597       0.30%    109       41.00       93.10     4990.17        8994.53  aicnormalizationpost HVX TCM (float16, float)
+c13      3635       0.28%         N/A         N/A     36     1152.00        3.16         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c13      3480       0.27%         N/A         N/A     37       18.50      188.11         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c13      2830       0.22%      152491       0.22%    109        0.85     3323.30   179072.00      228588.55  aicnormalizationpre HVX TCM (float, float16)
+c13      2595       0.20%      139258       0.20%    145     2896.00        0.90       48.09          75.91  aicconverttod32 HVX TCM (float16, i8)
+c13      2496       0.20%      132891       0.19%     72     1728.00        1.44       76.90          42.04  aicconvertweightstod32 HVX TCM (float16)
+c13      2400       0.19%         N/A         N/A      8        1.00     2400.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c13      2400       0.19%      128239       0.19%    361      135.50       17.71      946.41        3668.56  aicconvertfromd32 HVX TCM (float16)
+c13      2290       0.18%      122653       0.18%    144       36.00       63.61     3407.03        8123.47  batchedadd HVX TCM (float16)
+c13      2269       0.18%         N/A         N/A     72       36.00       63.03         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c13      2174       0.17%      115857       0.17%     36       36.00       60.39     3218.25        2217.46  aicsoftmax HVX TCM (float16, i8, index32)
+c13      2052       0.16%      108968       0.16%    142       36.00       57.00     3026.89        7418.35  convertto HVX TCM (float16, float)
+c13      1573       0.12%       84085       0.12%    142       72.00       21.85     1167.85        3572.29  convertto HVX TCM (float, float16)
+c13       867       0.07%       46813       0.07%     36     1152.00        0.75       40.64          37.02  aicselectsplatrange HVX TCM (float16, index32)
+c13       782       0.06%       41405       0.06%     72       11.25       69.51     3680.44       18807.39  elementneg  HVX TCM (float16)
+c13       643       0.05%       35109       0.05%     72       22.50       28.58     1560.40        8585.40  elementadd  HVX TCM (float16)
+c13       629       0.05%         N/A         N/A      2        0.01    80512.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c13       505       0.04%       27066       0.04%     72       36.00       14.03      751.83         517.32  aicbroadcastmul HVX TCM (float16)
+c13       474       0.04%       25441       0.04%     36       18.00       26.33     1413.39        1064.86  aicnormalization HVX TCM (float16)
+c13       470       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c13       356       0.03%         N/A         N/A      2        0.01    45568.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c13       285       0.02%         N/A         N/A      1        0.50      570.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c13       267       0.02%       14093       0.02%     36       36.00        7.42      391.47         664.23  aicmulsplat  HVX TCM (float16)
+c13        78       0.01%        4031       0.01%      1    59580.55        0.00        0.07           0.00  aicendcyclestats HVX DDR (i8)
+c13        75       0.01%        3902       0.01%      1    59580.55        0.00        0.07           0.00  aicendcyclestats HMX DDR (i8)
+c13        49       0.00%        2567       0.00%      1    59580.55        0.00        0.04           0.00  aicendcyclestats DMAIssue DDR (i8)
+c13        38       0.00%         N/A         N/A      1        0.50       76.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c13        24       0.00%        1204       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c13        10       0.00%         561       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c13         6       0.00%         306       0.00%      1        0.12       48.00     2448.00           0.00  splat  HVX TCM (index32)
+
+c13 total:         1277571 ucycles        68522989 pcycles (thread max)
+c13    t0 HVX              1277246 ucycles [78843106016, 78844383262]        68506078 pcycles  47.15% utilization
+c13    t1 HVX              1277246 ucycles [78843106016, 78844383262]        68506084 pcycles  45.37% utilization
+c13    t2 HVX              1277246 ucycles [78843106016, 78844383262]        68506089 pcycles  46.38% utilization
+c13    t3 HVX              1277246 ucycles [78843106016, 78844383262]        68506075 pcycles  45.02% utilization
+c13    t4 HMX              1277246 ucycles [78843106016, 78844383262]        68506073 pcycles  12.83% utilization
+c13    t5 DMAIssue         1277571 ucycles [78843106016, 78844383587]        68522989 pcycles   6.70% utilization
+
+
+c13t0 batch ucycles:          1277246 [78843106016,78844383262]    pcycles:        68506078 
+c13t1 batch ucycles:          1277246 [78843106016,78844383262]    pcycles:        68506084 
+c13t2 batch ucycles:          1277246 [78843106016,78844383262]    pcycles:        68506089 
+c13t3 batch ucycles:          1277246 [78843106016,78844383262]    pcycles:        68506075 
+c13t4 batch ucycles:          1277246 [78843106016,78844383262]    pcycles:        68506073 
+c13t5 batch ucycles:          1277571 [78843106016,78844383587]    pcycles:        68522989 
+c13: Total inference pcycle is 68522997
+c13: Effective frequency is 1029.8MHz
+c13t0 activate ucycles:             21533
+c13t1 activate ucycles:             21434
+c13t2 activate ucycles:             21248
+c13t3 activate ucycles:             21072
+c13t4 activate ucycles:             20886
+c13t5 activate ucycles:              2116
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c14   1072802      84.04%         N/A         N/A   3102   360535.50        2.98         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c14   1048777      82.15%         N/A         N/A   3098         N/A         N/A         N/A            N/A  sync HMX
+c14    543745      42.59%    29414044      42.95%   3032   923648.00        0.59       31.85          31.73  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c14    509191      39.89%         N/A         N/A   5160         N/A         N/A         N/A            N/A  sync HVX
+c14    250731      19.64%         N/A         N/A    219         N/A         N/A         N/A            N/A  sync DMAIssue
+c14    167880      13.15%     8896706      12.99%   3104   218864.00        0.77       40.65          38.79  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c14     53316       4.18%         N/A         N/A   5160         N/A         N/A         N/A            N/A  barrier HVX
+c14     27995       2.19%         N/A         N/A   3076         N/A         N/A         N/A            N/A  barrier HMX
+c14     26598       2.08%         N/A         N/A    399     4638.35        5.73         N/A            N/A  aicmulticastvtcm HVX TCM 
+c14     21754       1.70%         N/A         N/A    213       31.28      695.43         N/A            N/A  aiccopysamevtcm HVX TCM 
+c14     20621       1.62%     1103137       1.61%    119        0.93    22180.57  1186567.53      436600.61  aicmmap DMAIssue CacheableDDR (index32)
+c14     14421       1.13%         N/A         N/A     72     2304.00        6.26         N/A            N/A  aicgatherndrange DMAIssue DDR (float16, index32, bool)
+c14      9935       0.78%      524203       0.77%    119        0.93    10686.39   563848.61      265838.00  aicmunmap DMAIssue CacheableDDR (index32)
+c14      7559       0.59%      407140       0.59%    288     3465.00        2.18      117.50        5889.35  elementmul  HVX TCM (float16)
+c14      7024       0.55%         N/A         N/A    108     2322.00        3.02         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c14      6258       0.49%      338451       0.49%    108     1728.00        3.62      195.86         195.98  sigmoid  HVX TCM (float16)
+c14      5451       0.43%      292210       0.43%    108     9216.28        0.59       31.71       51352.17  inserttensor HVX TCM 
+c14      4131       0.32%         N/A         N/A     36     1152.00        3.59         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c14      3614       0.28%      194348       0.28%    109       41.00       88.15     4740.20        8900.08  aicnormalizationpost HVX TCM (float16, float)
+c14      3407       0.27%         N/A         N/A     37       18.50      184.16         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c14      3353       0.26%         N/A         N/A     72       36.00       93.14         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c14      2824       0.22%      151319       0.22%    145     2896.00        0.98       52.25          81.74  aicconverttod32 HVX TCM (float16, i8)
+c14      2818       0.22%      152138       0.22%    144       36.00       78.28     4226.06       12794.87  batchedadd HVX TCM (float16)
+c14      2666       0.21%      143466       0.21%     72     1728.00        1.54       83.02          54.69  aicconvertweightstod32 HVX TCM (float16)
+c14      2644       0.21%      141081       0.21%    361      135.50       19.51     1041.19        3943.47  aicconvertfromd32 HVX TCM (float16)
+c14      2161       0.17%      116777       0.17%    109        0.85     2537.69   137132.62      186694.04  aicnormalizationpre HVX TCM (float, float16)
+c14      1518       0.12%       81491       0.12%     36       36.00       42.17     2263.64        1244.15  aicsoftmax HVX TCM (float16, i8, index32)
+c14      1278       0.10%       68455       0.10%    142       72.00       17.75      950.76        2147.31  convertto HVX TCM (float, float16)
+c14      1102       0.09%       58856       0.09%     36     1152.00        0.96       51.09          53.76  aicselectsplatrange HVX TCM (float16, index32)
+c14       773       0.06%         N/A         N/A      2        0.01    98944.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c14       771       0.06%       42021       0.06%     72       22.50       34.27     1867.60       12824.53  elementadd  HVX TCM (float16)
+c14       751       0.06%       40588       0.06%     72       11.25       66.76     3607.82       21398.30  elementneg  HVX TCM (float16)
+c14       730       0.06%       39589       0.06%     72       36.00       20.28     1099.69        1098.68  aicbroadcastmul HVX TCM (float16)
+c14       728       0.06%       37930       0.06%    142       36.00       20.22     1053.61        3302.42  convertto HVX TCM (float16, float)
+c14       525       0.04%         N/A         N/A      2        0.01    67200.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c14       520       0.04%       27960       0.04%     36     1152.00        0.45       24.27          17.00  aicconverttod32 HVX TCM (float16, i8, bool)
+c14       463       0.04%         N/A         N/A      1        0.50      926.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c14       456       0.04%       24486       0.04%     36       18.00       25.33     1360.33         769.54  aicnormalization HVX TCM (float16)
+c14       444       0.03%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c14       367       0.03%         N/A         N/A      4        1.00      367.00         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c14       200       0.02%       10531       0.02%     36       36.00        5.56      292.53         348.59  aicmulsplat  HVX TCM (float16)
+c14       195       0.02%       10128       0.01%      1    59580.55        0.00        0.17           0.00  aicendcyclestats HMX DDR (i8)
+c14       192       0.02%        9985       0.01%      1    59580.55        0.00        0.17           0.00  aicendcyclestats HVX DDR (i8)
+c14        59       0.00%        3053       0.00%      1    59580.55        0.00        0.05           0.00  aicendcyclestats DMAIssue DDR (i8)
+c14        39       0.00%         N/A         N/A      1        0.50       78.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c14        30       0.00%        1545       0.00%      1        0.00    30720.00  1582080.00           0.00  aicreducebooltoscalar HVX TCM (bool, ui8)
+c14        27       0.00%        1382       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c14        16       0.00%         841       0.00%      1        0.00    16384.00   861184.00           0.00  elementcmplte  HVX TCM (bool, index32)
+c14        11       0.00%         567       0.00%      1    36864.01        0.00        0.02           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c14         6       0.00%         328       0.00%      1        0.12       48.00     2624.00           0.00  splat  HVX TCM (index32)
+
+c14 total:         1276613 ucycles        68478849 pcycles (thread max)
+c14    t0 HVX              1276314 ucycles [78843106015, 78844382329]        68463312 pcycles  45.54% utilization
+c14    t1 HVX              1276314 ucycles [78843106015, 78844382329]        68463298 pcycles  46.27% utilization
+c14    t2 HVX              1276314 ucycles [78843106015, 78844382329]        68463304 pcycles  45.93% utilization
+c14    t3 HVX              1276314 ucycles [78843106015, 78844382329]        68463298 pcycles  44.53% utilization
+c14    t4 HMX              1276314 ucycles [78843106015, 78844382329]        68463300 pcycles  13.01% utilization
+c14    t5 DMAIssue         1276613 ucycles [78843106015, 78844382628]        68478849 pcycles   6.54% utilization
+
+
+c14t0 batch ucycles:          1276314 [78843106015,78844382329]    pcycles:        68463312 
+c14t1 batch ucycles:          1276314 [78843106015,78844382329]    pcycles:        68463298 
+c14t2 batch ucycles:          1276314 [78843106015,78844382329]    pcycles:        68463304 
+c14t3 batch ucycles:          1276314 [78843106015,78844382329]    pcycles:        68463298 
+c14t4 batch ucycles:          1276314 [78843106015,78844382329]    pcycles:        68463300 
+c14t5 batch ucycles:          1276613 [78843106015,78844382628]    pcycles:        68478849 
+c14: Total inference pcycle is 68478855
+c14: Effective frequency is 1029.91MHz
+c14t0 activate ucycles:             21276
+c14t1 activate ucycles:             21176
+c14t2 activate ucycles:             21000
+c14t3 activate ucycles:             20828
+c14t4 activate ucycles:             20656
+c14t5 activate ucycles:              2106
+
+core  ucycles  ucycles(%)     pcycles  pcycles(%)  count      out KB  ucycles/KB  pcycles/KB  stddev(pc/KB)  opdetails
+c15   1075648      84.23%         N/A         N/A   3103   360535.62        2.98         N/A            N/A  aiccopytovtcm DMAIssue DDR 
+c15   1044970      81.83%         N/A         N/A   3100         N/A         N/A         N/A            N/A  sync HMX
+c15    544749      42.66%    29374219      42.94%   3032   923648.00        0.59       31.80          31.80  blockdequantize_mxfp6 HVX TCM (float16, uindex8)
+c15    505752      39.61%         N/A         N/A   5124         N/A         N/A         N/A            N/A  sync HVX
+c15    251850      19.72%         N/A         N/A    206         N/A         N/A         N/A            N/A  sync DMAIssue
+c15    171420      13.42%     9008109      13.17%   3104   218864.00        0.78       41.16          39.75  aicconvolutiond32 HMX TCM (float16, i8, index32)
+c15     54577       4.27%         N/A         N/A   5124         N/A         N/A         N/A            N/A  barrier HVX
+c15     28166       2.21%         N/A         N/A   3082         N/A         N/A         N/A            N/A  barrier HMX
+c15     25794       2.02%         N/A         N/A    399     3488.60        7.39         N/A            N/A  aicmulticastvtcm HVX TCM 
+c15     22183       1.74%     1183547       1.73%    119        0.93    23860.71  1273058.96      510810.94  aicmmap DMAIssue CacheableDDR (index32)
+c15     21102       1.65%         N/A         N/A    249       33.53      629.32         N/A            N/A  aiccopysamevtcm HVX TCM 
+c15     10395       0.81%      536056       0.78%    119        0.93    11181.18   576598.05      297500.28  aicmunmap DMAIssue CacheableDDR (index32)
+c15      7616       0.60%      409612       0.60%    288     3465.00        2.20      118.21        5981.50  elementmul  HVX TCM (float16)
+c15      7195       0.56%         N/A         N/A    108     2322.00        3.10         N/A            N/A  aiccopysamevtcm2d HVX TCM 
+c15      5834       0.46%      316251       0.46%    108     1728.00        3.38      183.02         172.09  sigmoid  HVX TCM (float16)
+c15      5560       0.44%      298832       0.44%    108     9216.28        0.60       32.42       61718.31  inserttensor HVX TCM 
+c15      4057       0.32%         N/A         N/A     36     1152.00        3.52         N/A            N/A  aicmulticastvtcm2d HVX TCM 
+c15      3836       0.30%         N/A         N/A     72       36.00      106.56         N/A            N/A  aiccopysamevtcm2d DMAIssue TCM 
+c15      3777       0.30%      202040       0.30%    109       41.00       92.12     4927.80        7058.70  aicnormalizationpost HVX TCM (float16, float)
+c15      3356       0.26%         N/A         N/A     37       18.50      181.41         N/A            N/A  aiccopyfromvtcm HVX DDR 
+c15      3306       0.26%      178439       0.26%    144       36.00       91.83     4956.64       10187.36  batchedadd HVX TCM (float16)
+c15      2573       0.20%      138219       0.20%     72     1728.00        1.49       79.99          57.15  aicconvertweightstod32 HVX TCM (float16)
+c15      2528       0.20%      135254       0.20%    145     2896.00        0.87       46.70          66.84  aicconverttod32 HVX TCM (float16, i8)
+c15      2483       0.19%      133106       0.19%    361      135.50       18.32      982.33        4232.73  aicconvertfromd32 HVX TCM (float16)
+c15      2183       0.17%      117827       0.17%    109        0.85     2563.52   138365.65      202727.81  aicnormalizationpre HVX TCM (float, float16)
+c15      1946       0.15%      104440       0.15%     36       36.00       54.06     2901.11        1768.33  aicsoftmax HVX TCM (float16, i8, index32)
+c15      1158       0.09%       62054       0.09%     36     1152.00        1.01       53.87          60.35  aicselectsplatrange HVX TCM (float16, index32)
+c15      1049       0.08%       56679       0.08%    142       72.00       14.57      787.21        2161.43  convertto HVX TCM (float, float16)
+c15       958       0.08%         N/A         N/A      2        0.01   122624.00         N/A            N/A  aiccopysamevtcm DMAIssue CacheableDDR 
+c15       800       0.06%       42124       0.06%    142       36.00       22.22     1170.11        3656.71  convertto HVX TCM (float16, float)
+c15       697       0.05%       37632       0.06%     72       36.00       19.36     1045.33         962.76  aicbroadcastmul HVX TCM (float16)
+c15       549       0.04%         N/A         N/A      2        0.01    70272.00         N/A            N/A  aiccopysamevtcm DMAIssue TCM 
+c15       545       0.04%       29069       0.04%     72       22.50       24.22     1291.96        5968.57  elementadd  HVX TCM (float16)
+c15       544       0.04%       29247       0.04%     72       11.25       48.36     2599.73       12938.88  elementneg  HVX TCM (float16)
+c15       477       0.04%         N/A         N/A      1        0.50      954.00         N/A            N/A  aicgather HVX DDR (float16, ui8, index32)
+c15       455       0.04%         N/A         N/A    239         N/A         N/A         N/A            N/A  barrier DMAIssue
+c15       418       0.03%       22340       0.03%     36       18.00       23.22     1241.11         560.11  aicnormalization HVX TCM (float16)
+c15       400       0.03%         N/A         N/A      5        1.12      355.56         N/A            N/A  aicmulticastvtcm DMAIssue TCM 
+c15       179       0.01%        9340       0.01%     36       36.00        4.97      259.44         377.66  aicmulsplat  HVX TCM (float16)
+c15       131       0.01%        6824       0.01%      1    59580.55        0.00        0.11           0.00  aicendcyclestats HVX DDR (i8)
+c15       126       0.01%        6546       0.01%      1    59580.55        0.00        0.11           0.00  aicendcyclestats HMX DDR (i8)
+c15        49       0.00%        2501       0.00%      1    59580.55        0.00        0.04           0.00  aicendcyclestats DMAIssue DDR (i8)
+c15        44       0.00%         N/A         N/A      1        0.50       88.00         N/A            N/A  aicgather HVX CacheableDDR (float16, ui8, index32)
+c15        37       0.00%        1960       0.00%      1         N/A         N/A         N/A            N/A  aicoutputsemaphoreinc HMX DDR (i8)
+c15        20       0.00%        1026       0.00%      1    36864.01        0.00        0.03           0.00  aicinputsemaphoreinc HMX DDR (index32, i8)
+c15        11       0.00%         568       0.00%      1        0.00    11264.00   581632.00           0.00  elementcmplte  HVX TCM (bool, index32)
+c15         7       0.00%         389       0.00%      1        0.12       56.00     3112.00           0.00  splat  HVX TCM (index32)
+c15         4       0.00%         197       0.00%      1        0.00     4096.00   201728.00           0.00  aicreducebooltoscalar HVX TCM (bool, ui8)
+
+c15 total:         1276976 ucycles        68409229 pcycles (thread max)
+c15    t0 HVX              1276575 ucycles [78843106014, 78844382589]        68388342 pcycles  46.93% utilization
+c15    t1 HVX              1276575 ucycles [78843106014, 78844382589]        68388350 pcycles  44.85% utilization
+c15    t2 HVX              1276576 ucycles [78843106013, 78844382589]        68388343 pcycles  44.49% utilization
+c15    t3 HVX              1276576 ucycles [78843106013, 78844382589]        68388359 pcycles  45.90% utilization
+c15    t4 HMX              1276575 ucycles [78843106014, 78844382589]        68388348 pcycles  13.19% utilization
+c15    t5 DMAIssue         1276976 ucycles [78843106014, 78844382990]        68409229 pcycles   6.68% utilization
+
+
+c15t0 batch ucycles:          1276575 [78843106014,78844382589]    pcycles:        68388342 
+c15t1 batch ucycles:          1276575 [78843106014,78844382589]    pcycles:        68388350 
+c15t2 batch ucycles:          1276576 [78843106013,78844382589]    pcycles:        68388343 
+c15t3 batch ucycles:          1276576 [78843106013,78844382589]    pcycles:        68388359 
+c15t4 batch ucycles:          1276575 [78843106014,78844382589]    pcycles:        68388348 
+c15t5 batch ucycles:          1276976 [78843106014,78844382990]    pcycles:        68409229 
+c15: Total inference pcycle is 68409238
+c15: Effective frequency is 1028.57MHz
+c15t0 activate ucycles:             21287
+c15t1 activate ucycles:             21189
+c15t2 activate ucycles:             21001
+c15t3 activate ucycles:             20834
+c15t4 activate ucycles:             20648
+c15t5 activate ucycles:              2134
+total batch ucycles:          1317137 [78843106004, 78844423141]
+[QAicGraph] Device instance batch/s: (1/0.0686009): 14.5771
+[QAicGraph] Device instance inf/s: (1/0.0686009): 14.5771
